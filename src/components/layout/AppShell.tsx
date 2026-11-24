@@ -1,0 +1,186 @@
+"use client";
+
+import React, { useState } from "react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  Activity,
+  Calendar,
+  CalendarOff,
+  Clock,
+  CreditCard,
+  FileBarChart,
+  FileText,
+  LayoutDashboard,
+  LogOut,
+  Mail,
+  MailCheck,
+  Menu,
+  Settings,
+  Tag,
+  User as UserIcon,
+  Users,
+  UtensilsCrossed,
+  X,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+
+export interface NavUser {
+  id: string;
+  name: string;
+  email: string;
+  role: "ADMIN" | "GUEST";
+}
+
+const ADMIN_NAV = [
+  { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/calendar", label: "Meal Calendar", icon: Calendar },
+  { href: "/admin/confirmations", label: "Meal Confirmations", icon: MailCheck },
+  { href: "/admin/guests", label: "Guests", icon: Users },
+  { href: "/admin/adjustment-requests", label: "Adjustment Requests", icon: Clock },
+  { href: "/admin/invoices", label: "Invoices & Billing", icon: FileText },
+  { href: "/admin/payments", label: "Payments", icon: CreditCard },
+  { href: "/admin/reports", label: "Reports", icon: FileBarChart },
+  { href: "/admin/holidays", label: "Holidays", icon: CalendarOff },
+  { href: "/admin/pricing", label: "Meal Pricing", icon: Tag },
+  { href: "/admin/email-logs", label: "Email Logs", icon: Mail },
+  { href: "/admin/activity-logs", label: "Activity Logs", icon: Activity },
+  { href: "/admin/settings", label: "Settings", icon: Settings },
+];
+
+const GUEST_NAV = [
+  { href: "/guest/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/guest/calendar", label: "My Meal Calendar", icon: Calendar },
+  { href: "/guest/invoices", label: "My Invoices", icon: FileText },
+  { href: "/guest/payments", label: "My Payments", icon: CreditCard },
+  { href: "/guest/activity", label: "My Activity", icon: Activity },
+  { href: "/guest/profile", label: "Profile", icon: UserIcon },
+];
+
+export function AppShell({
+  user,
+  children,
+}: {
+  user: NavUser;
+  children: React.ReactNode;
+}) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const navItems = user.role === "ADMIN" ? ADMIN_NAV : GUEST_NAV;
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    toast.success("Signed out");
+    router.push("/login");
+    router.refresh();
+  }
+
+  const sidebarContent = (
+    <div className="flex h-full flex-col bg-white border-r border-slate-200">
+      <div className="flex h-16 items-center gap-2.5 px-5 border-b border-slate-100">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-xs">
+          <UtensilsCrossed className="h-5 w-5" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-slate-900 truncate">Office Meal</p>
+          <p className="text-[11px] font-medium text-slate-500">
+            {user.role === "ADMIN" ? "Admin Portal" : "Guest Portal"}
+          </p>
+        </div>
+      </div>
+
+      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const active = pathname === item.href || pathname.startsWith(item.href + "/");
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={() => setMobileOpen(false)}
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                active
+                  ? "bg-blue-50 text-blue-700"
+                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              )}
+            >
+              <Icon className={cn("h-4 w-4 shrink-0", active ? "text-blue-600" : "text-slate-400")} />
+              <span className="truncate">{item.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="border-t border-slate-100 p-3">
+        <div className="mb-2 rounded-lg bg-slate-50 px-3 py-2">
+          <p className="text-xs font-semibold text-slate-900 truncate">{user.name}</p>
+          <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
+        </div>
+        <button
+          onClick={handleLogout}
+          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-red-50 hover:text-red-700 transition-colors cursor-pointer"
+        >
+          <LogOut className="h-4 w-4" />
+          Sign Out
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen flex bg-slate-50">
+      {/* Desktop Sidebar */}
+      <aside className="hidden lg:block lg:w-64 lg:shrink-0 lg:sticky lg:top-0 lg:h-screen">
+        {sidebarContent}
+      </aside>
+
+      {/* Mobile Drawer */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex">
+          <div
+            className="fixed inset-0 bg-slate-900/40"
+            onClick={() => setMobileOpen(false)}
+          />
+          <div className="relative z-10 w-64 max-w-[80vw] h-full">
+            <button
+              onClick={() => setMobileOpen(false)}
+              className="absolute right-3 top-4 z-20 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            {sidebarContent}
+          </div>
+        </div>
+      )}
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200 bg-white/95 backdrop-blur-xs px-4 lg:px-6">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              className="lg:hidden rounded-lg p-2 text-slate-600 hover:bg-slate-100"
+              aria-label="Open menu"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+            <h1 className="text-sm font-semibold text-slate-800">
+              {navItems.find((i) => pathname === i.href || pathname.startsWith(i.href + "/"))
+                ?.label ?? "Office Meal Management"}
+            </h1>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-slate-500">
+            <span className="hidden sm:inline">Lunch Only • Asia/Dhaka (11:50 PM Cutoff)</span>
+          </div>
+        </header>
+
+        <main className="flex-1 p-4 lg:p-6 max-w-7xl w-full mx-auto">{children}</main>
+      </div>
+    </div>
+  );
+}

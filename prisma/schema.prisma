@@ -1,0 +1,372 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  GUEST
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  INACTIVE
+}
+
+enum MealPreference {
+  REGULAR
+  OCCASIONAL
+}
+
+enum HolidayType {
+  HOLIDAY
+  OFFICE_CLOSED
+  SPECIAL_WORKING_DAY
+}
+
+enum AdjustmentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  OTHER
+}
+
+enum PaymentType {
+  FULL
+  PARTIAL
+  SELECTED_DATES
+}
+
+enum EmailType {
+  MEAL_CONFIRMATION
+  MEAL_ADJUSTMENT
+  INVOICE
+  PAYMENT_CONFIRMATION
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum MealSource {
+  DEFAULT
+  GUEST_OVERRIDE
+  ADMIN_OVERRIDE
+  ADJUSTMENT_REQUEST
+  FOLLOWING_RULE
+}
+
+enum MealOverrideScope {
+  SINGLE_DATE
+  FOLLOWING_DATES
+}
+
+model User {
+  id             String         @id @default(cuid())
+  name           String
+  email          String         @unique
+  passwordHash   String?
+  phone          String?
+  role           UserRole       @default(GUEST)
+  status         UserStatus     @default(INVITED)
+  mealPreference MealPreference @default(REGULAR)
+  defaultMealQty Int            @default(1)
+  mealStartDate  String?
+  joinedAt       DateTime       @default(now())
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  invitation             Invitation?
+  mealRecords            MealRecord[]
+  adjustmentRequests     MealAdjustmentRequest[] @relation("GuestAdjustmentRequests")
+  reviewedAdjustments    MealAdjustmentRequest[] @relation("ReviewerAdjustmentRequests")
+  invoices               Invoice[]
+  payments               Payment[]               @relation("GuestPayments")
+  recordedPayments       Payment[]               @relation("RecorderPayments")
+  actorActivityLogs      ActivityLog[]           @relation("ActorActivityLogs")
+  targetActivityLogs     ActivityLog[]           @relation("TargetActivityLogs")
+  generatedSchedules     MonthlyMealSchedule[]
+  createdMealPrices      MealPrice[]
+  guestEmailLogs         EmailLog[]              @relation("GuestEmailLogs")
+  sentEmailLogs          EmailLog[]              @relation("SenderEmailLogs")
+  createdPublicTokens    PublicInvoiceToken[]
+  mealRuleHistories      MealRuleHistory[]       @relation("GuestMealRules")
+  changedMealRules       MealRuleHistory[]       @relation("ChangerMealRules")
+}
+
+model Invitation {
+  id         String    @id @default(cuid())
+  userId     String    @unique
+  token      String    @unique
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model OrganizationSettings {
+  id                    String   @id @default("default")
+  organizationName      String   @default("Office Meal Service")
+  timezone              String   @default("Asia/Dhaka")
+  defaultMealPricePoisha Int     @default(12000)
+  deadlineHour          Int      @default(23)
+  deadlineMinute        Int      @default(50)
+  maxMealQty            Int?
+  weekendDays           String   @default("6,0")
+  updatedAt             DateTime @updatedAt
+}
+
+model MonthlyMealSchedule {
+  id            String   @id @default(cuid())
+  year          Int
+  month         Int
+  generatedAt   DateTime @default(now())
+  generatedById String?
+
+  generatedBy User? @relation(fields: [generatedById], references: [id], onDelete: SetNull)
+
+  @@unique([year, month])
+}
+
+model MealPrice {
+  id          String   @id @default(cuid())
+  date        String   @unique
+  pricePoisha Int
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+}
+
+model Holiday {
+  id         String      @id @default(cuid())
+  date       String      @unique
+  name       String
+  type       HolidayType @default(HOLIDAY)
+  allowMeals Boolean     @default(false)
+  note       String?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+}
+
+model MealRecord {
+  id              String   @id @default(cuid())
+  userId          String
+  date            String
+  quantity        Int                @default(0)
+  unitPricePoisha Int
+  source          MealSource         @default(DEFAULT)
+  overrideScope   MealOverrideScope?
+  isCustomized    Boolean            @default(false)
+  isFinalized     Boolean            @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  adjustmentRequests MealAdjustmentRequest[]
+  invoiceItem        InvoiceItem?
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+model MealAdjustmentRequest {
+  id                String           @id @default(cuid())
+  userId            String
+  mealRecordId      String
+  date              String
+  currentQuantity   Int
+  requestedQuantity Int
+  reason            String?
+  status            AdjustmentStatus @default(PENDING)
+  reviewedById      String?
+  reviewedAt        DateTime?
+  reviewNote        String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  user       User       @relation("GuestAdjustmentRequests", fields: [userId], references: [id], onDelete: Cascade)
+  mealRecord MealRecord @relation(fields: [mealRecordId], references: [id], onDelete: Cascade)
+  reviewedBy User?      @relation("ReviewerAdjustmentRequests", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([date])
+}
+
+model Invoice {
+  id                String        @id @default(cuid())
+  invoiceNumber     String        @unique
+  userId            String
+  year              Int
+  month             Int
+  totalMeals        Int           @default(0)
+  totalAmountPoisha Int           @default(0)
+  paidAmountPoisha  Int           @default(0)
+  status            InvoiceStatus @default(UNPAID)
+  generatedAt       DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items        InvoiceItem[]
+  payments     Payment[]
+  publicTokens PublicInvoiceToken[]
+  emailLogs    EmailLog[]
+
+  @@unique([userId, year, month])
+}
+
+model InvoiceItem {
+  id                String  @id @default(cuid())
+  invoiceId         String
+  mealRecordId      String  @unique
+  date              String
+  quantity          Int
+  unitPricePoisha   Int
+  totalAmountPoisha Int
+  paidAmountPoisha  Int     @default(0)
+  isPaid            Boolean @default(false)
+
+  invoice     Invoice             @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  mealRecord  MealRecord          @relation(fields: [mealRecordId], references: [id], onDelete: Cascade)
+  allocations PaymentAllocation[]
+
+  @@index([invoiceId])
+  @@index([date])
+}
+
+model Payment {
+  id           String        @id @default(cuid())
+  invoiceId    String
+  userId       String
+  amountPoisha Int
+  method       PaymentMethod @default(CASH)
+  paymentType  PaymentType   @default(PARTIAL)
+  reference    String?
+  note         String?
+  paidAt       DateTime      @default(now())
+  recordedById String?
+  createdAt    DateTime      @default(now())
+
+  invoice     Invoice             @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  user        User                @relation("GuestPayments", fields: [userId], references: [id], onDelete: Cascade)
+  recordedBy  User?               @relation("RecorderPayments", fields: [recordedById], references: [id], onDelete: SetNull)
+  allocations PaymentAllocation[]
+  emailLogs   EmailLog[]
+
+  @@index([invoiceId])
+  @@index([userId])
+}
+
+model PaymentAllocation {
+  id            String   @id @default(cuid())
+  paymentId     String
+  invoiceItemId String?
+  amountPoisha  Int
+  createdAt     DateTime @default(now())
+
+  payment     Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoiceItem InvoiceItem? @relation(fields: [invoiceItemId], references: [id], onDelete: SetNull)
+
+  @@index([paymentId])
+  @@index([invoiceItemId])
+}
+
+model ActivityLog {
+  id            String   @id @default(cuid())
+  actorId       String?
+  targetUserId  String?
+  action        String
+  entityType    String
+  entityId      String
+  date          String?
+  previousValue String?
+  newValue      String?
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  actor      User? @relation("ActorActivityLogs", fields: [actorId], references: [id], onDelete: SetNull)
+  targetUser User? @relation("TargetActivityLogs", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([targetUserId])
+  @@index([date])
+}
+
+model PublicInvoiceToken {
+  id          String    @id @default(cuid())
+  invoiceId   String
+  token       String    @unique
+  revokedAt   DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId])
+}
+
+model EmailLog {
+  id              String      @id @default(cuid())
+  emailType       EmailType
+  recipientEmail  String
+  subject         String
+  guestId         String?
+  mealDate        String?
+  invoiceId       String?
+  paymentId       String?
+  sentById        String?
+  resendMessageId String?
+  status          EmailStatus @default(PENDING)
+  errorMessage    String?
+  sentAt          DateTime?
+  createdAt       DateTime    @default(now())
+
+  guest   User?    @relation("GuestEmailLogs", fields: [guestId], references: [id], onDelete: SetNull)
+  sentBy  User?    @relation("SenderEmailLogs", fields: [sentById], references: [id], onDelete: SetNull)
+  invoice Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([emailType, mealDate])
+  @@index([invoiceId])
+  @@index([guestId])
+  @@index([createdAt])
+}
+
+model MealRuleHistory {
+  id            String            @id @default(cuid())
+  userId        String
+  effectiveFrom String
+  quantity      Int
+  scope         MealOverrideScope
+  source        MealSource
+  changedById   String?
+  reason        String?
+  createdAt     DateTime          @default(now())
+
+  user      User  @relation("GuestMealRules", fields: [userId], references: [id], onDelete: Cascade)
+  changedBy User? @relation("ChangerMealRules", fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, effectiveFrom])
+}
