@@ -3,10 +3,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   CalendarOff,
+  Check,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock,
+  Copy,
   Lock,
   Mail,
   Minus,
@@ -38,6 +40,8 @@ import {
   setCachedCalendar,
 } from "@/lib/calendar-cache";
 import { invalidateDashboardCache } from "@/lib/dashboard-cache";
+import { copyTextToClipboard, formatMealSummaryText } from "@/lib/meal-summary";
+import { addDays } from "@/lib/timezone";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -101,6 +105,7 @@ interface CalendarResponse {
   guestMealStartDate?: string | null;
   guests?: CalendarGuestSummary[];
   settings: {
+    organizationName?: string;
     timezone: string;
     defaultMealPricePoisha: number;
     deadlineHour: number;
@@ -153,6 +158,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
   const [overrideReason, setOverrideReason] = useState("");
   const [showUnscheduledGuests, setShowUnscheduledGuests] = useState(false);
   const [guestSearch, setGuestSearch] = useState("");
+  const [copiedDaySummary, setCopiedDaySummary] = useState(false);
   const baselineQtyRef = useRef<Map<string, number>>(new Map());
   const [lastAdjustment, setLastAdjustment] = useState<{
     guestId: string;
@@ -587,11 +593,62 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
     setOverrideReason("");
     setShowUnscheduledGuests(day.records.length === 0);
     setGuestSearch("");
+    setCopiedDaySummary(false);
     setLastAdjustment(null);
     setAffectedInvoice(null);
     const currentQty = day.records[0]?.quantity ?? 0;
     setLateQty(currentQty > 0 ? 0 : 1);
     setLateReason("");
+  }
+
+  async function handleCopyDaySummary() {
+    if (!selectedDay) return;
+    const todayStr = data?.today ?? selectedDay.date;
+    const tomorrowStr = addDays(todayStr, 1);
+    const activeRecords = selectedDay.records.filter((r) => r.quantity > 0);
+    const storedSig =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem("pcs_meal_summary_signature") || undefined
+        : undefined;
+
+    const text = formatMealSummaryText(
+      {
+        period:
+          selectedDay.date === todayStr
+            ? "today"
+            : selectedDay.date === tomorrowStr
+            ? "tomorrow"
+            : "custom",
+        today: todayStr,
+        tomorrow: tomorrowStr,
+        startDate: selectedDay.date,
+        endDate: selectedDay.date,
+        organizationName: data?.settings.organizationName,
+        totalMeals: selectedDay.totalMeals,
+        totalGuestsWithMeals: activeRecords.length,
+        totalAmountPoisha: selectedDay.totalAmountPoisha,
+        guests: activeRecords.map((r) => ({
+          userId: r.userId,
+          name: r.guestName,
+          email: r.guestEmail,
+          status: r.guestStatus,
+          totalMeals: r.quantity,
+          totalAmountPoisha: r.totalPoisha,
+          daysCount: 1,
+        })),
+        dailyBreakdown: [],
+      },
+      storedSig ? { signature: storedSig } : undefined
+    );
+
+    try {
+      await copyTextToClipboard(text);
+      setCopiedDaySummary(true);
+      toast.success("Meal summary copied to clipboard");
+      setTimeout(() => setCopiedDaySummary(false), 2000);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to copy summary");
+    }
   }
 
   function renderDayStatusBadge(day: CalendarDay) {
@@ -1005,11 +1062,29 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
                       {selectedDay.totalMeals} meals • {formatBDT(selectedDay.totalAmountPoisha)}
                     </p>
                   </div>
-                  {selectedDay.isLocked && (
-                    <Badge variant="danger">
-                      <Lock className="h-3 w-3" /> Past Deadline (Admin Override Enabled)
-                    </Badge>
-                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleCopyDaySummary}
+                    >
+                      {copiedDaySummary ? (
+                        <>
+                          <Check className="h-3.5 w-3.5 text-emerald-600" /> Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-3.5 w-3.5" /> Copy Summary
+                        </>
+                      )}
+                    </Button>
+                    {selectedDay.isLocked && (
+                      <Badge variant="danger">
+                        <Lock className="h-3 w-3" /> Past Deadline (Admin Override Enabled)
+                      </Badge>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

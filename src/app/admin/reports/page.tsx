@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatBDT } from "@/lib/money";
+import { MealSummaryPanel } from "@/components/summary/MealSummaryPanel";
 import { toast } from "sonner";
 
 interface ReportData {
@@ -180,6 +181,18 @@ export default function AdminReportsPage() {
         </div>
       </div>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Copyable Total Meal Summary</CardTitle>
+          <CardDescription>
+            Generate and copy Today, Tomorrow, Weekly, Monthly, or Custom meal summaries for sharing.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <MealSummaryPanel />
+        </CardContent>
+      </Card>
+
       {loading || !data ? (
         <p className="text-sm text-slate-500 py-8 text-center">Loading reports...</p>
       ) : (
@@ -342,8 +355,8 @@ export default function AdminReportsPage() {
                               inv.status === "PAID"
                                 ? "success"
                                 : inv.status === "PARTIALLY_PAID"
-                                ? "warning"
-                                : "danger"
+                                  ? "warning"
+                                  : "danger"
                             }
                           >
                             {inv.status.replace("_", " ")}

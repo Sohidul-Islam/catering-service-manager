@@ -1,7 +1,20 @@
 import { prisma } from "@/lib/prisma";
-import { getDateRange, getMonthDateRange } from "@/lib/timezone";
-import { InvoiceStatus, UserRole } from "@prisma/client";
-import { getSettings, isWorkingDay } from "./schedule.service";
+import {
+  getDateRange,
+  getMonthDateRange,
+  getNextDateStr,
+  getNowInTimezone,
+  getWeekDateRange,
+  parseDateStr,
+} from "@/lib/timezone";
+import { InvoiceStatus, UserRole, UserStatus } from "@prisma/client";
+import { ensureMonthSchedule, getSettings, isWorkingDay } from "./schedule.service";
+import type {
+  MealSummaryDailyItem,
+  MealSummaryGuestItem,
+  MealSummaryPayload,
+  MealSummaryPeriod,
+} from "@/lib/meal-summary";
 
 export async function getMonthlyReport(params: {
   year: number;
@@ -129,6 +142,171 @@ export async function getMonthlyReport(params: {
       invoices,
     },
     guests: allGuests,
+  };
+}
+
+export async function getMealSummary(params: {
+  period: MealSummaryPeriod;
+  date?: string;
+  year?: number;
+  month?: number;
+  startDate?: string;
+  endDate?: string;
+}): Promise<MealSummaryPayload> {
+  const settings = await getSettings();
+  const now = getNowInTimezone(settings.timezone);
+  const tomorrow = getNextDateStr(now.dateStr);
+
+  let startDate: string;
+  let endDate: string;
+
+  if (params.period === "today") {
+    const target = params.date || now.dateStr;
+    startDate = target;
+    endDate = target;
+  } else if (params.period === "tomorrow") {
+    startDate = tomorrow;
+    endDate = tomorrow;
+  } else if (params.period === "weekly") {
+    const week = getWeekDateRange(params.date || now.dateStr);
+    startDate = week.startDate;
+    endDate = week.endDate;
+  } else if (params.period === "monthly") {
+    const targetYear = params.year ?? now.year;
+    const targetMonth = params.month ?? now.month;
+    const monthDates = getMonthDateRange(targetYear, targetMonth);
+    startDate = monthDates[0];
+    endDate = monthDates[monthDates.length - 1];
+  } else {
+    const s = params.startDate || params.date || now.dateStr;
+    const e = params.endDate || s;
+    if (s > e) {
+      throw new Error("Start date must be on or before end date.");
+    }
+    startDate = s;
+    endDate = e;
+  }
+
+  const sParsed = parseDateStr(startDate);
+  const eParsed = parseDateStr(endDate);
+  const dayCount =
+    Math.floor(
+      (Date.UTC(eParsed.year, eParsed.month - 1, eParsed.day) -
+        Date.UTC(sParsed.year, sParsed.month - 1, sParsed.day)) /
+        86_400_000
+    ) + 1;
+
+  if (dayCount <= 62) {
+    let curY = sParsed.year;
+    let curM = sParsed.month;
+    while (curY < eParsed.year || (curY === eParsed.year && curM <= eParsed.month)) {
+      await ensureMonthSchedule(curY, curM, null, false, settings);
+      if (curM === 12) {
+        curY += 1;
+        curM = 1;
+      } else {
+        curM += 1;
+      }
+    }
+  }
+
+  const [records, activeGuests] = await Promise.all([
+    prisma.mealRecord.findMany({
+      where: {
+        date: { gte: startDate, lte: endDate },
+        quantity: { gt: 0 },
+        user: { role: UserRole.GUEST },
+      },
+      include: {
+        user: {
+          select: { id: true, name: true, email: true, status: true },
+        },
+      },
+      orderBy: [{ date: "asc" }, { user: { name: "asc" } }],
+    }),
+    prisma.user.findMany({
+      where: { role: UserRole.GUEST, status: UserStatus.ACTIVE },
+      select: { id: true, name: true, email: true, status: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+
+  const guestMap = new Map<string, MealSummaryGuestItem>();
+  for (const g of activeGuests) {
+    guestMap.set(g.id, {
+      userId: g.id,
+      name: g.name,
+      email: g.email,
+      status: g.status,
+      totalMeals: 0,
+      totalAmountPoisha: 0,
+      daysCount: 0,
+    });
+  }
+
+  const dailyMap = new Map<
+    string,
+    { date: string; totalMeals: number; guestIds: Set<string>; totalAmountPoisha: number }
+  >();
+
+  for (const r of records) {
+    const amountPoisha = r.quantity * r.unitPricePoisha;
+    const existingGuest = guestMap.get(r.userId) ?? {
+      userId: r.userId,
+      name: r.user.name,
+      email: r.user.email,
+      status: r.user.status,
+      totalMeals: 0,
+      totalAmountPoisha: 0,
+      daysCount: 0,
+    };
+    existingGuest.totalMeals += r.quantity;
+    existingGuest.totalAmountPoisha += amountPoisha;
+    existingGuest.daysCount = (existingGuest.daysCount ?? 0) + 1;
+    guestMap.set(r.userId, existingGuest);
+
+    const daily = dailyMap.get(r.date) ?? {
+      date: r.date,
+      totalMeals: 0,
+      guestIds: new Set<string>(),
+      totalAmountPoisha: 0,
+    };
+    daily.totalMeals += r.quantity;
+    daily.guestIds.add(r.userId);
+    daily.totalAmountPoisha += amountPoisha;
+    dailyMap.set(r.date, daily);
+  }
+
+  const guests = Array.from(guestMap.values()).sort(
+    (a, b) => a.name.localeCompare(b.name) || a.email.localeCompare(b.email)
+  );
+
+  const dailyBreakdown: MealSummaryDailyItem[] = Array.from(dailyMap.values())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((d) => ({
+      date: d.date,
+      totalMeals: d.totalMeals,
+      guestsCount: d.guestIds.size,
+      totalAmountPoisha: d.totalAmountPoisha,
+    }));
+
+  const totalMeals = guests.reduce((s, g) => s + g.totalMeals, 0);
+  const totalGuestsWithMeals = guests.filter((g) => g.totalMeals > 0).length;
+  const totalAmountPoisha = guests.reduce((s, g) => s + g.totalAmountPoisha, 0);
+
+  return {
+    period: params.period,
+    today: now.dateStr,
+    tomorrow,
+    startDate,
+    endDate,
+    timezone: settings.timezone,
+    organizationName: settings.organizationName,
+    totalMeals,
+    totalGuestsWithMeals,
+    totalAmountPoisha,
+    guests,
+    dailyBreakdown,
   };
 }
 

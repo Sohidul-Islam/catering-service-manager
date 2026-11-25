@@ -16,6 +16,8 @@ import {
   revokePublicInvoiceToken,
 } from "../src/services/public-invoice.service";
 import { previewInvoiceEmail, previewMealConfirmation } from "../src/services/notification.service";
+import { getMealSummary } from "../src/services/report.service";
+import { formatMealSummaryText } from "../src/lib/meal-summary";
 import { isPastMealDeadline } from "../src/lib/timezone";
 import { hashPassword } from "../src/services/auth.service";
 import {
@@ -531,6 +533,73 @@ async function run() {
   const apr03Item = aprInvoice.items.find((i) => i.date === "2028-04-03");
   assert.equal(apr03Item?.quantity, 2, "April invoice must include admin-added historical 2028-04-03 meal record");
 
+  // 13. Copyable Meal Summary formatting & Today / Weekly / Monthly aggregation
+  const exactExampleText = formatMealSummaryText({
+    period: "today",
+    today: "2026-11-25",
+    tomorrow: "2026-11-26",
+    startDate: "2026-11-25",
+    endDate: "2026-11-25",
+    organizationName: "Office Meal Management",
+    totalMeals: 4,
+    totalGuestsWithMeals: 3,
+    totalAmountPoisha: 48000,
+    guests: [
+      { userId: "1", name: "Milon", email: "milon.mw2026@gmail.com", totalMeals: 1, totalAmountPoisha: 12000 },
+      { userId: "2", name: "Zihad", email: "mdzihadbinjahangir@gmail.com", totalMeals: 1, totalAmountPoisha: 12000 },
+      { userId: "3", name: "Extra", email: "extra@office.com", totalMeals: 2, totalAmountPoisha: 24000 },
+    ],
+    dailyBreakdown: [],
+  });
+  assert.equal(
+    exactExampleText,
+    [
+      "Hello,",
+      "Here is today's meal summary (November 25, 2026):",
+      "1. milon.mw2026@gmail.com",
+      "2. mdzihadbinjahangir@gmail.com",
+      "3. extra@office.com (2 meals)",
+      "Total Meal: 4",
+      "Thank you!",
+      "Premium Catering Service (Mediusware Ltd)",
+    ].join("\n"),
+    "Today summary formatting must match expected copyable template"
+  );
+
+  const todaySummary = await getMealSummary({ period: "today", date: "2028-03-01" });
+  assert.equal(todaySummary.startDate, "2028-03-01");
+  assert.equal(todaySummary.endDate, "2028-03-01");
+  assert.ok(todaySummary.totalMeals >= 3);
+  assert.ok(todaySummary.totalGuestsWithMeals >= 2);
+  const regTodayItem = todaySummary.guests.find((g) => g.userId === regGuest.id);
+  const occTodayItem = todaySummary.guests.find((g) => g.userId === occGuest.id);
+  assert.equal(regTodayItem?.totalMeals, 2);
+  assert.equal(occTodayItem?.totalMeals, 1);
+
+  const weeklySummary = await getMealSummary({ period: "weekly", date: "2028-03-01" });
+  assert.equal(weeklySummary.startDate, "2028-02-27");
+  assert.equal(weeklySummary.endDate, "2028-03-04");
+  const occWeeklyItem = weeklySummary.guests.find((g) => g.userId === occGuest.id);
+  assert.equal(occWeeklyItem?.totalMeals, 3, "Occasional guest had 1 on Mar 1 + 2 on Mar 3 in that week");
+
+  const enhancedWeeklyText = formatMealSummaryText(weeklySummary, {
+    guestDisplay: "name_email",
+    includeCost: true,
+    includeDailyBreakdown: true,
+    customNote: "Deliver at 1:00 PM",
+  });
+  assert.ok(enhancedWeeklyText.includes("Verify Regular (verify-reg@office.com)"));
+  assert.ok(enhancedWeeklyText.includes("Daily Breakdown:"));
+  assert.ok(enhancedWeeklyText.includes("Total Amount:"));
+  assert.ok(enhancedWeeklyText.includes("Note: Deliver at 1:00 PM"));
+
+  const monthlySummary = await getMealSummary({ period: "monthly", year: 2028, month: 3 });
+  assert.equal(monthlySummary.startDate, "2028-03-01");
+  assert.equal(monthlySummary.endDate, "2028-03-31");
+  assert.ok(monthlySummary.totalMeals >= weeklySummary.totalMeals);
+  const monthlyText = formatMealSummaryText(monthlySummary);
+  assert.ok(monthlyText.includes("Here is the monthly meal summary (March 2028):"));
+
   // Clean up test data
   await prisma.emailLog.deleteMany({
     where: { guestId: { in: [regGuest.id, occGuest.id] } },
@@ -550,7 +619,7 @@ async function run() {
   await prisma.holiday.deleteMany({ where: { date: { startsWith: "2028-03-" } } });
   await prisma.mealPrice.deleteMany({ where: { date: { startsWith: "2028-03-" } } });
   await prisma.monthlyMealSchedule.deleteMany({
-    where: { year: TEST_YEAR, month: { in: [3, 4, 5] } },
+    where: { year: TEST_YEAR, month: { in: [2, 3, 4, 5] } },
   });
 
   // Also test syncGuestMonthSchedule returns cleanly for non-existent user

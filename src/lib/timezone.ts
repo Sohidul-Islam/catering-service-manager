@@ -96,6 +96,22 @@ export function getDateRange(startDateStr: string, endDateStr: string): string[]
   return result;
 }
 
+export function addDays(dateStr: string, deltaDays: number): string {
+  const { year, month, day } = parseDateStr(dateStr);
+  const utc = new Date(Date.UTC(year, month - 1, day + deltaDays));
+  return formatDateStr(utc.getUTCFullYear(), utc.getUTCMonth() + 1, utc.getUTCDate());
+}
+
+/**
+ * Returns the Sunday..Saturday week range containing `dateStr`.
+ */
+export function getWeekDateRange(dateStr: string): { startDate: string; endDate: string } {
+  const dow = getDayOfWeek(dateStr); // 0 = Sun .. 6 = Sat
+  const startDate = addDays(dateStr, -dow);
+  const endDate = addDays(startDate, 6);
+  return { startDate, endDate };
+}
+
 /**
  * 0 = Sunday, 1 = Monday, ..., 6 = Saturday
  */
@@ -128,6 +144,44 @@ export function formatReadableDate(dateStr: string): string {
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+export function formatLongDate(dateStr: string): string {
+  const { year, month, day } = parseDateStr(dateStr);
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+export function formatMonthYear(year: number, month: number): string {
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+export function formatDateRangeLabel(startDate: string, endDate: string): string {
+  if (startDate === endDate) {
+    return formatLongDate(startDate);
+  }
+  const s = parseDateStr(startDate);
+  const e = parseDateStr(endDate);
+  if (s.year === e.year) {
+    const startNoYear = new Date(Date.UTC(s.year, s.month - 1, s.day)).toLocaleDateString(
+      "en-US",
+      {
+        month: "long",
+        day: "numeric",
+        timeZone: "UTC",
+      }
+    );
+    return `${startNoYear} – ${formatLongDate(endDate)}`;
+  }
+  return `${formatLongDate(startDate)} – ${formatLongDate(endDate)}`;
 }
 
 /**

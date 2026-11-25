@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { CheckCircle2, Eye, Mail, Send } from "lucide-react";
+import { Check, CheckCircle2, Copy, Eye, Mail, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/table";
 import { EmailPreviewData, EmailPreviewModal } from "@/components/email/EmailPreviewModal";
 import { formatBDT } from "@/lib/money";
+import { copyTextToClipboard, formatMealSummaryText } from "@/lib/meal-summary";
+import { addDays } from "@/lib/timezone";
 import { toast } from "sonner";
 
 interface ConfirmationGuestRow {
@@ -48,6 +50,9 @@ export default function AdminMealConfirmationsPage() {
   const [sending, setSending] = useState(false);
   const [previewData, setPreviewData] = useState<EmailPreviewData | null>(null);
   const [targetGuestIds, setTargetGuestIds] = useState<string[]>([]);
+  const [organizationName, setOrganizationName] = useState<string | undefined>(undefined);
+  const [todayStr, setTodayStr] = useState<string>("");
+  const [copiedSummary, setCopiedSummary] = useState(false);
 
   async function loadDay() {
     setLoading(true);
@@ -56,6 +61,8 @@ export default function AdminMealConfirmationsPage() {
       const res = await fetch(`/api/calendar?year=${y}&month=${m}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load meal records");
+      setOrganizationName(json.settings?.organizationName);
+      setTodayStr(json.today ?? "");
       const day = (json.days as { date: string; records: ConfirmationGuestRow[] }[]).find(
         (d) => d.date === date
       );
@@ -152,6 +159,53 @@ export default function AdminMealConfirmationsPage() {
 
   const activeRows = rows.filter((r) => r.quantity > 0);
 
+  async function handleCopySummary() {
+    const effectiveToday = todayStr || date;
+    const effectiveTomorrow = addDays(effectiveToday, 1);
+    const storedSig =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem("pcs_meal_summary_signature") || undefined
+        : undefined;
+
+    const text = formatMealSummaryText(
+      {
+        period:
+          date === effectiveToday
+            ? "today"
+            : date === effectiveTomorrow
+            ? "tomorrow"
+            : "custom",
+        today: effectiveToday,
+        tomorrow: effectiveTomorrow,
+        startDate: date,
+        endDate: date,
+        organizationName,
+        totalMeals: activeRows.reduce((s, r) => s + r.quantity, 0),
+        totalGuestsWithMeals: activeRows.length,
+        totalAmountPoisha: activeRows.reduce((s, r) => s + r.totalPoisha, 0),
+        guests: activeRows.map((r) => ({
+          userId: r.userId,
+          name: r.guestName,
+          email: r.guestEmail,
+          totalMeals: r.quantity,
+          totalAmountPoisha: r.totalPoisha,
+          daysCount: 1,
+        })),
+        dailyBreakdown: [],
+      },
+      storedSig ? { signature: storedSig } : undefined
+    );
+
+    try {
+      await copyTextToClipboard(text);
+      setCopiedSummary(true);
+      toast.success("Meal summary copied to clipboard");
+      setTimeout(() => setCopiedSummary(false), 2000);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to copy summary");
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -183,6 +237,22 @@ export default function AdminMealConfirmationsPage() {
               className="mt-1 w-56"
             />
           </div>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={loading}
+            onClick={handleCopySummary}
+          >
+            {copiedSummary ? (
+              <>
+                <Check className="h-4 w-4 text-emerald-600" /> Copied
+              </>
+            ) : (
+              <>
+                <Copy className="h-4 w-4" /> Copy Summary
+              </>
+            )}
+          </Button>
           <Button
             variant="outline"
             disabled={selectedIds.length === 0}

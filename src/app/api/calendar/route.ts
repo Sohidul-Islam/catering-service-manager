@@ -190,6 +190,7 @@ export async function GET(req: NextRequest) {
       guestMealStartDate: isAdmin ? null : user.mealStartDate ?? null,
       ...(isAdmin ? { guests: allGuests } : {}),
       settings: {
+        organizationName: settings.organizationName,
         timezone: settings.timezone,
         defaultMealPricePoisha: settings.defaultMealPricePoisha,
         deadlineHour: settings.deadlineHour,

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   Calendar,
   Clock,
+  Copy,
   CreditCard,
   FileText,
   UserPlus,
@@ -29,6 +30,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Dialog } from "@/components/ui/dialog";
+import { MealSummaryPanel } from "@/components/summary/MealSummaryPanel";
 import {
   Table,
   TableBody,
@@ -77,6 +80,7 @@ export default function AdminDashboardPage() {
   const router = useRouter();
   const [data, setData] = useState<AdminDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [summaryOpen, setSummaryOpen] = useState(false);
 
   async function loadDashboard(force = false) {
     const cacheKey = "ADMIN";
@@ -171,6 +175,9 @@ export default function AdminDashboardPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setSummaryOpen(true)}>
+            <Copy className="h-4 w-4" /> Copy Meal Summary
+          </Button>
           <Link href="/admin/guests">
             <Button size="sm" variant="outline">
               <UserPlus className="h-4 w-4" /> Add / Invite Guest
@@ -443,6 +450,16 @@ export default function AdminDashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={summaryOpen}
+        onClose={() => setSummaryOpen(false)}
+        title="Copyable Meal Summary"
+        description="Copy today's, weekly, or monthly meal summaries for messaging or catering."
+        maxWidthClass="max-w-2xl"
+      >
+        <MealSummaryPanel compact />
+      </Dialog>
     </div>
   );
 }
