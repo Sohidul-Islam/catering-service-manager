@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { invalidateCalendarCache } from "@/lib/calendar-cache";
 import { toast } from "sonner";
 
 export interface NavUser {
@@ -73,6 +74,7 @@ export function AppShell({
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
+    invalidateCalendarCache();
     toast.success("Signed out");
     router.push("/login");
     router.refresh();

@@ -31,6 +31,12 @@ import {
 } from "@/components/ui/table";
 import { EmailPreviewData, EmailPreviewModal } from "@/components/email/EmailPreviewModal";
 import { formatBDT } from "@/lib/money";
+import {
+  fetchCalendarDeduped,
+  getCachedCalendar,
+  invalidateCalendarCache,
+  setCachedCalendar,
+} from "@/lib/calendar-cache";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -154,31 +160,66 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [previewData, setPreviewData] = useState<EmailPreviewData | null>(null);
 
-  const fetchCalendar = useCallback(
-    async (silent = false) => {
-      if (!silent) setLoading(true);
-      try {
-        const res = await fetch(`/api/calendar?year=${year}&month=${month}`);
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || "Failed to load calendar");
-        setData(json);
+  const cacheKey = `${mode}:${year}-${month}`;
+  const activeKeyRef = useRef(cacheKey);
 
+  const fetchCalendar = useCallback(
+    async (silent = false, force = false) => {
+      const requestKey = `${mode}:${year}-${month}`;
+      const cached = !force ? getCachedCalendar<CalendarResponse>(requestKey) : null;
+
+      if (cached) {
+        setData(cached.data);
         setSelectedDay((prev) => {
           if (!prev) return null;
-          return (json.days as CalendarDay[]).find((d) => d.date === prev.date) ?? prev;
+          return cached.data.days.find((d) => d.date === prev.date) ?? prev;
+        });
+        setLoading(false);
+        if (cached.isFresh) {
+          return;
+        }
+      } else if (!silent) {
+        setLoading(true);
+      }
+
+      try {
+        const loadFromApi = async () => {
+          const res = await fetch(`/api/calendar?year=${year}&month=${month}`);
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || "Failed to load calendar");
+          return json as CalendarResponse;
+        };
+
+        const json = force
+          ? await loadFromApi()
+          : await fetchCalendarDeduped(requestKey, loadFromApi);
+
+        setCachedCalendar(requestKey, json);
+
+        if (activeKeyRef.current !== requestKey) return;
+
+        setData(json);
+        setSelectedDay((prev) => {
+          if (!prev) return null;
+          return json.days.find((d) => d.date === prev.date) ?? prev;
         });
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to load calendar");
+        if (!cached && activeKeyRef.current === requestKey) {
+          toast.error(err instanceof Error ? err.message : "Failed to load calendar");
+        }
       } finally {
-        if (!silent) setLoading(false);
+        if (!silent && !cached && activeKeyRef.current === requestKey) {
+          setLoading(false);
+        }
       }
     },
-    [year, month]
+    [mode, year, month]
   );
 
   useEffect(() => {
-    fetchCalendar(false);
-  }, [fetchCalendar]);
+    activeKeyRef.current = cacheKey;
+    fetchCalendar(false, false);
+  }, [cacheKey, fetchCalendar]);
 
   function handlePrevMonth() {
     if (month === 1) {
@@ -219,7 +260,8 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
       toast.success(
         `Schedule synced for ${MONTH_NAMES[month - 1]} ${year} (${json.createdCount} new records)`
       );
-      fetchCalendar(true);
+      invalidateCalendarCache(cacheKey);
+      fetchCalendar(true, true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Generation failed");
     }
@@ -332,11 +374,17 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
             setAffectedInvoice(json.affectedInvoice);
           }
 
-          await fetchCalendar(true);
+          if (selectedScope === "FOLLOWING_DATES") {
+            invalidateCalendarCache();
+          } else {
+            invalidateCalendarCache(cacheKey);
+          }
+          await fetchCalendar(true, true);
         }
       } catch (err) {
         if (latestSeqRef.current.get(key) === nextSeq) {
           baselineQtyRef.current.delete(key);
+          invalidateCalendarCache(cacheKey);
           setData(prevData);
           setSelectedDay(prevSelectedDay);
           toast.error(err instanceof Error ? err.message : "Update failed", {
@@ -416,6 +464,8 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
       if (!res.ok) throw new Error(json.error || "Failed to update invoice");
       toast.success(`Invoice ${affectedInvoice.invoiceNumber} recalculated`);
       setAffectedInvoice(null);
+      invalidateCalendarCache(cacheKey);
+      await fetchCalendar(true, true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Recalculation failed");
     } finally {
@@ -441,7 +491,8 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
       if (!res.ok) throw new Error(json.error || "Failed to submit request");
       toast.success("Late adjustment request submitted for admin approval");
       setLateReason("");
-      await fetchCalendar(true);
+      invalidateCalendarCache(cacheKey);
+      await fetchCalendar(true, true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to submit");
     } finally {
