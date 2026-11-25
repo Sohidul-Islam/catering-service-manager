@@ -116,6 +116,45 @@ export function resolveEffectiveMealRule(
   };
 }
 
+type MealRecordCreateInput = {
+  userId: string;
+  date: string;
+  quantity: number;
+  unitPricePoisha: number;
+  source: MealSource;
+  overrideScope: MealOverrideScope | null;
+  isCustomized: boolean;
+  isFinalized: boolean;
+};
+
+/**
+ * Inserts meal records in batches to avoid interactive transaction timeouts on
+ * remote LibSQL/Turso, falling back to upserts only if a concurrent request races.
+ */
+async function insertMealRecordsIdempotently(records: MealRecordCreateInput[]): Promise<void> {
+  if (records.length === 0) return;
+
+  const CHUNK_SIZE = 50;
+  for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+    const chunk = records.slice(i, i + CHUNK_SIZE);
+    try {
+      await prisma.mealRecord.createMany({ data: chunk });
+    } catch (error: unknown) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code !== "P2002") {
+        throw error;
+      }
+      for (const item of chunk) {
+        await prisma.mealRecord.upsert({
+          where: { userId_date: { userId: item.userId, date: item.date } },
+          update: {},
+          create: item,
+        });
+      }
+    }
+  }
+}
+
 /**
  * Idempotently generates the monthly meal schedule for all active guests.
  * - Excludes dates before each guest's mealStartDate
@@ -186,16 +225,7 @@ export async function ensureMonthSchedule(
     rulesByGuest.set(r.userId, list);
   }
 
-  const toCreate: {
-    userId: string;
-    date: string;
-    quantity: number;
-    unitPricePoisha: number;
-    source: MealSource;
-    overrideScope: MealOverrideScope | null;
-    isCustomized: boolean;
-    isFinalized: boolean;
-  }[] = [];
+  const toCreate: MealRecordCreateInput[] = [];
 
   for (const dateStr of dates) {
     const working = isWorkingDay(dateStr, settings, holidayMap);
@@ -224,33 +254,22 @@ export async function ensureMonthSchedule(
     }
   }
 
-  if (toCreate.length > 0) {
-    await prisma.$transaction(async (tx) => {
-      for (const item of toCreate) {
-        await tx.mealRecord.upsert({
-          where: { userId_date: { userId: item.userId, date: item.date } },
-          update: {},
-          create: item,
-        });
-      }
-    });
-  }
+  await insertMealRecordsIdempotently(toCreate);
 
-  let schedule = existingSchedule;
-  if (!schedule) {
-    schedule = await prisma.monthlyMealSchedule.create({
-      data: {
-        year,
-        month,
-        generatedById: actorId ?? null,
-      },
-    });
-  } else if (forceLog) {
-    schedule = await prisma.monthlyMealSchedule.update({
-      where: { id: schedule.id },
-      data: { generatedAt: new Date(), generatedById: actorId ?? schedule.generatedById },
-    });
-  }
+  const schedule = await prisma.monthlyMealSchedule.upsert({
+    where: { year_month: { year, month } },
+    update: forceLog
+      ? {
+          generatedAt: new Date(),
+          generatedById: actorId ?? existingSchedule?.generatedById ?? null,
+        }
+      : {},
+    create: {
+      year,
+      month,
+      generatedById: actorId ?? null,
+    },
+  });
 
   if ((!existingSchedule || forceLog || toCreate.length > 0) && actorId) {
     await logActivity({
@@ -311,7 +330,7 @@ export async function syncGuestMonthSchedule(userId: string, year: number, month
   const priceMap = new Map(mealPrices.map((p) => [p.date, p.pricePoisha]));
   const existingSet = new Set(existingRecords.map((r) => r.date));
 
-  let created = 0;
+  const toCreate: MealRecordCreateInput[] = [];
   for (const dateStr of dates) {
     if (existingSet.has(dateStr)) continue;
     const rule = resolveEffectiveMealRule(guest, dateStr, followingRules);
@@ -320,22 +339,19 @@ export async function syncGuestMonthSchedule(userId: string, year: number, month
     const working = isWorkingDay(dateStr, settings, holidayMap);
     const unitPricePoisha = resolveMealPrice(dateStr, settings, priceMap);
 
-    await prisma.mealRecord.upsert({
-      where: { userId_date: { userId, date: dateStr } },
-      update: {},
-      create: {
-        userId,
-        date: dateStr,
-        quantity: working ? rule.quantity : 0,
-        unitPricePoisha,
-        source: rule.source,
-        overrideScope: rule.overrideScope,
-        isCustomized: false,
-        isFinalized: false,
-      },
+    toCreate.push({
+      userId,
+      date: dateStr,
+      quantity: working ? rule.quantity : 0,
+      unitPricePoisha,
+      source: rule.source,
+      overrideScope: rule.overrideScope,
+      isCustomized: false,
+      isFinalized: false,
     });
-    created++;
   }
 
-  return created;
+  await insertMealRecordsIdempotently(toCreate);
+
+  return toCreate.length;
 }
