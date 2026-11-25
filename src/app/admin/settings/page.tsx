@@ -5,6 +5,7 @@ import { KeyRound, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { poishaToBdt } from "@/lib/money";
 import { toast } from "sonner";
 
@@ -261,9 +262,8 @@ export default function AdminSettingsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-slate-100 pt-4">
                 <div>
                   <Label htmlFor="a-cur-pass">Current Password</Label>
-                  <Input
+                  <PasswordInput
                     id="a-cur-pass"
-                    type="password"
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
                     placeholder="Required to change password"
@@ -272,9 +272,8 @@ export default function AdminSettingsPage() {
                 </div>
                 <div>
                   <Label htmlFor="a-new-pass">New Password (optional)</Label>
-                  <Input
+                  <PasswordInput
                     id="a-new-pass"
-                    type="password"
                     minLength={6}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}

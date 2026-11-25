@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { toast } from "sonner";
 
 interface ProfileUser {
@@ -109,9 +110,8 @@ export default function GuestProfilePage() {
                 <p className="text-xs font-semibold text-slate-600">Change Password (optional)</p>
                 <div>
                   <Label htmlFor="gp-cur">Current Password</Label>
-                  <Input
+                  <PasswordInput
                     id="gp-cur"
-                    type="password"
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
                     className="mt-1"
@@ -119,9 +119,8 @@ export default function GuestProfilePage() {
                 </div>
                 <div>
                   <Label htmlFor="gp-new">New Password</Label>
-                  <Input
+                  <PasswordInput
                     id="gp-new"
-                    type="password"
                     minLength={6}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
