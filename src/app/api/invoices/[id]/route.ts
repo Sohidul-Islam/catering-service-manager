@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/services/auth.service";
+import { requireAdmin, requireAuth } from "@/services/auth.service";
+import { deleteInvoice } from "@/services/invoice.service";
 import { handleApiError } from "@/lib/api-utils";
 import { UserRole } from "@prisma/client";
 
@@ -40,6 +41,28 @@ export async function GET(
     }
 
     return NextResponse.json({ invoice });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const admin = await requireAdmin();
+    const { id } = await context.params;
+
+    const deleted = await deleteInvoice(id, admin.id);
+    if (!deleted) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      deleted: true,
+      invoiceNumber: deleted.invoiceNumber,
+    });
   } catch (error) {
     return handleApiError(error);
   }

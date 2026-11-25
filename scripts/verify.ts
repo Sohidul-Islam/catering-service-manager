@@ -7,7 +7,11 @@ import {
   reviewAdjustmentRequest,
   MealServiceError,
 } from "../src/services/meal.service";
-import { generateMonthlyInvoices, recalculateInvoiceFromMeals } from "../src/services/invoice.service";
+import {
+  deleteInvoice,
+  generateMonthlyInvoices,
+  recalculateInvoiceFromMeals,
+} from "../src/services/invoice.service";
 import { recordPayment, PaymentServiceError } from "../src/services/payment.service";
 import {
   generatePublicInvoiceToken,
@@ -39,19 +43,58 @@ async function run() {
   const TEST_MONTH = 3;
   // March 2028: Mar 1 (Wed), Mar 2 (Thu), Mar 3 (Fri), Mar 4 (Sat - weekend), Mar 5 (Sun - weekend), Mar 6 (Mon)...
 
+  const VERIFY_EMAILS = [
+    "verify-reg@office.com",
+    "verify-occ@office.com",
+    "verify-admin@office.com",
+    "verify-latestart@office.com",
+  ];
+
+  async function cleanupTestArtifacts() {
+    const testUsers = await prisma.user.findMany({
+      where: { email: { in: VERIFY_EMAILS } },
+      select: { id: true },
+    });
+    const testUserIds = testUsers.map((u) => u.id);
+
+    if (testUserIds.length > 0) {
+      await prisma.emailLog.deleteMany({
+        where: { guestId: { in: testUserIds } },
+      });
+    }
+    await prisma.invoice.deleteMany({ where: { year: TEST_YEAR } });
+    await prisma.mealRecord.deleteMany({
+      where: { date: { startsWith: `${TEST_YEAR}-` } },
+    });
+    await prisma.holiday.deleteMany({
+      where: { date: { startsWith: `${TEST_YEAR}-` } },
+    });
+    await prisma.mealPrice.deleteMany({
+      where: { date: { startsWith: `${TEST_YEAR}-` } },
+    });
+    await prisma.monthlyMealSchedule.deleteMany({
+      where: { year: TEST_YEAR },
+    });
+    await prisma.activityLog.deleteMany({
+      where: {
+        OR: [
+          { date: { startsWith: `${TEST_YEAR}-` } },
+          { newValue: { contains: String(TEST_YEAR) } },
+          { previousValue: { contains: String(TEST_YEAR) } },
+        ],
+      },
+    });
+    if (testUserIds.length > 0) {
+      await prisma.user.deleteMany({
+        where: { id: { in: testUserIds } },
+      });
+    }
+  }
+
   // Clean up previous test artifacts if any
-  await prisma.user.deleteMany({
-    where: { email: { in: ["verify-reg@office.com", "verify-occ@office.com", "verify-admin@office.com"] } },
-  });
-  await prisma.holiday.deleteMany({
-    where: { date: { startsWith: "2028-03-" } },
-  });
-  await prisma.mealPrice.deleteMany({
-    where: { date: { startsWith: "2028-03-" } },
-  });
-  await prisma.monthlyMealSchedule.deleteMany({
-    where: { year: TEST_YEAR, month: TEST_MONTH },
-  });
+  await cleanupTestArtifacts();
+
+  try {
 
   // 1. Admin & Guest creation + invite acceptance
   const admin = await prisma.user.create({
@@ -533,6 +576,24 @@ async function run() {
   const apr03Item = aprInvoice.items.find((i) => i.date === "2028-04-03");
   assert.equal(apr03Item?.quantity, 2, "April invoice must include admin-added historical 2028-04-03 meal record");
 
+  // Delete April invoice -> invoice removed, meal records preserved & unfinalized, activity logged
+  const deletedApr = await deleteInvoice(aprInvoice.id, admin.id);
+  assert.equal(deletedApr?.invoiceNumber, aprInvoice.invoiceNumber);
+  assert.equal(
+    await prisma.invoice.findUnique({ where: { id: aprInvoice.id } }),
+    null,
+    "Deleted invoice must not exist"
+  );
+  const apr03AfterDelete = await prisma.mealRecord.findUnique({
+    where: { userId_date: { userId: lateStarter.id, date: "2028-04-03" } },
+  });
+  assert.equal(apr03AfterDelete?.quantity, 2, "Meal record must be preserved after invoice deletion");
+  assert.equal(apr03AfterDelete?.isFinalized, false, "Meal record must be unfinalized after invoice deletion");
+  const deleteLog = await prisma.activityLog.findFirst({
+    where: { entityType: "Invoice", entityId: aprInvoice.id, action: "DELETE_INVOICE" },
+  });
+  assert.ok(deleteLog, "DELETE_INVOICE activity log must be recorded");
+
   // 13. Copyable Meal Summary formatting & Today / Weekly / Monthly aggregation
   const exactExampleText = formatMealSummaryText({
     period: "today",
@@ -600,33 +661,14 @@ async function run() {
   const monthlyText = formatMealSummaryText(monthlySummary);
   assert.ok(monthlyText.includes("Here is the monthly meal summary (March 2028):"));
 
-  // Clean up test data
-  await prisma.emailLog.deleteMany({
-    where: { guestId: { in: [regGuest.id, occGuest.id] } },
-  });
-  await prisma.user.deleteMany({
-    where: {
-      email: {
-        in: [
-          "verify-reg@office.com",
-          "verify-occ@office.com",
-          "verify-admin@office.com",
-          "verify-latestart@office.com",
-        ],
-      },
-    },
-  });
-  await prisma.holiday.deleteMany({ where: { date: { startsWith: "2028-03-" } } });
-  await prisma.mealPrice.deleteMany({ where: { date: { startsWith: "2028-03-" } } });
-  await prisma.monthlyMealSchedule.deleteMany({
-    where: { year: TEST_YEAR, month: { in: [2, 3, 4, 5] } },
-  });
-
   // Also test syncGuestMonthSchedule returns cleanly for non-existent user
   const synced = await syncGuestMonthSchedule("non-existent", TEST_YEAR, TEST_MONTH);
   assert.equal(synced, 0);
 
   console.log("ALL VERIFICATION CHECKS PASSED!");
+  } finally {
+    await cleanupTestArtifacts();
+  }
 }
 
 run()

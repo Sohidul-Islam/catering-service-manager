@@ -108,6 +108,8 @@ export async function GET() {
         (s, g) => s + g.outstandingPoisha,
         0
       );
+      const totalCollectedAllTime = guestBalances.reduce((s, g) => s + g.paidPoisha, 0);
+      const totalBilledAllTime = guestBalances.reduce((s, g) => s + g.billedPoisha, 0);
 
       return NextResponse.json({
         role: "ADMIN",
@@ -123,6 +125,8 @@ export async function GET() {
           monthlyAmountPoisha,
           invoicedTotalPoisha,
           collectedPaymentsPoisha,
+          totalCollectedAllTimePoisha: totalCollectedAllTime,
+          totalBilledAllTimePoisha: totalBilledAllTime,
           outstandingDuesPoisha: totalOutstandingAllTime,
           pendingRequestsCount,
         },

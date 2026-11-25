@@ -61,6 +61,8 @@ interface AdminDashboardData {
     monthlyAmountPoisha: number;
     invoicedTotalPoisha: number;
     collectedPaymentsPoisha: number;
+    totalCollectedAllTimePoisha?: number;
+    totalBilledAllTimePoisha?: number;
     outstandingDuesPoisha: number;
     pendingRequestsCount: number;
   };
@@ -151,10 +153,13 @@ export default function AdminDashboardPage() {
     year: "numeric",
   });
 
+  const totalCollectedAllTime =
+    stats.totalCollectedAllTimePoisha ?? stats.collectedPaymentsPoisha;
+
   const paidVsUnpaidData = [
     {
       name: "Collected",
-      value: Math.round(stats.collectedPaymentsPoisha / 100),
+      value: Math.round(totalCollectedAllTime / 100),
       color: "#10b981",
     },
     {
@@ -359,7 +364,7 @@ export default function AdminDashboardPage() {
                 <div className="flex items-center gap-4 text-xs mt-1">
                   <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700">
                     <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                    Collected: {formatBDT(stats.collectedPaymentsPoisha)}
+                    Collected: {formatBDT(totalCollectedAllTime)}
                   </span>
                   <span className="inline-flex items-center gap-1.5 font-medium text-red-600">
                     <span className="h-2.5 w-2.5 rounded-full bg-red-500" />

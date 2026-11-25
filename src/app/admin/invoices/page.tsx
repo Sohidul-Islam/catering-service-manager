@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/table";
 import { EmailPreviewData, EmailPreviewModal } from "@/components/email/EmailPreviewModal";
 import { formatBDT } from "@/lib/money";
+import { invalidateDashboardCache } from "@/lib/dashboard-cache";
 import { toast } from "sonner";
 
 interface InvoiceItemRow {
@@ -64,6 +65,8 @@ export default function AdminInvoicesPage() {
   const [generating, setGenerating] = useState(false);
   const [confirmGenerateOpen, setConfirmGenerateOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<InvoiceRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Email preview state
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -108,11 +111,35 @@ export default function AdminInvoicesPage() {
       if (!res.ok) throw new Error(json.error || "Failed to generate invoices");
       toast.success(`Generated/updated ${json.count} invoice(s)`);
       setConfirmGenerateOpen(false);
+      invalidateDashboardCache();
       loadInvoices();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Generation failed");
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function handleDeleteInvoice() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/invoices/${deleteTarget.id}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to delete invoice");
+      toast.success(`Invoice ${deleteTarget.invoiceNumber} deleted`);
+      if (selectedInvoice?.id === deleteTarget.id) {
+        setSelectedInvoice(null);
+      }
+      setDeleteTarget(null);
+      invalidateDashboardCache();
+      await loadInvoices();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete invoice");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -348,6 +375,15 @@ export default function AdminInvoicesPage() {
                           >
                             <Eye className="h-3.5 w-3.5" /> View
                           </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                            onClick={() => setDeleteTarget(inv)}
+                            title="Delete Invoice"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Delete
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -488,9 +524,42 @@ export default function AdminInvoicesPage() {
                   ))}
               </TableBody>
             </Table>
+
+            <div className="flex justify-end border-t border-slate-100 pt-3">
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => setDeleteTarget(selectedInvoice)}
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Delete Invoice
+              </Button>
+            </div>
           </div>
         )}
       </Dialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteInvoice}
+        title="Delete Invoice"
+        description={
+          deleteTarget
+            ? `Delete invoice ${deleteTarget.invoiceNumber} for ${deleteTarget.user.name} (${deleteTarget.year}-${String(
+                deleteTarget.month
+              ).padStart(2, "0")}, Total: ${formatBDT(deleteTarget.totalAmountPoisha)})?${
+                deleteTarget.paidAmountPoisha > 0
+                  ? ` Warning: This will also permanently delete recorded payment(s) totaling ${formatBDT(
+                      deleteTarget.paidAmountPoisha
+                    )}.`
+                  : ""
+              } Underlying meal records in the calendar are preserved and can be re-invoiced later.`
+            : ""
+        }
+        confirmLabel="Delete Invoice"
+        variant="destructive"
+        loading={deleting}
+      />
 
       <ConfirmDialog
         open={confirmGenerateOpen}

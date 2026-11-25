@@ -295,3 +295,59 @@ export async function recalculateInvoiceFromMeals(invoiceId: string, actorId: st
     return updated;
   });
 }
+
+export async function deleteInvoice(invoiceId: string, actorId: string) {
+  return prisma.$transaction(async (tx) => {
+    const invoice = await tx.invoice.findUnique({
+      where: { id: invoiceId },
+      include: {
+        _count: {
+          select: { payments: true, items: true },
+        },
+      },
+    });
+    if (!invoice) {
+      return null;
+    }
+
+    const monthDates = getMonthDateRange(invoice.year, invoice.month);
+    await tx.mealRecord.updateMany({
+      where: {
+        userId: invoice.userId,
+        date: { gte: monthDates[0], lte: monthDates[monthDates.length - 1] },
+      },
+      data: { isFinalized: false },
+    });
+
+    await tx.invoice.delete({
+      where: { id: invoiceId },
+    });
+
+    await logActivity({
+      tx,
+      actorId,
+      targetUserId: invoice.userId,
+      action: "DELETE_INVOICE",
+      entityType: "Invoice",
+      entityId: invoice.id,
+      previousValue: JSON.stringify({
+        invoiceNumber: invoice.invoiceNumber,
+        year: invoice.year,
+        month: invoice.month,
+        totalMeals: invoice.totalMeals,
+        totalAmountPoisha: invoice.totalAmountPoisha,
+        paidAmountPoisha: invoice.paidAmountPoisha,
+        deletedPaymentsCount: invoice._count.payments,
+      }),
+    });
+
+    return {
+      id: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      year: invoice.year,
+      month: invoice.month,
+      userId: invoice.userId,
+      deletedPaymentsCount: invoice._count.payments,
+    };
+  });
+}
