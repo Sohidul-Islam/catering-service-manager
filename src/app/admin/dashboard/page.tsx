@@ -38,6 +38,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatBDT } from "@/lib/money";
+import {
+  fetchDashboardDeduped,
+  getCachedDashboard,
+  setCachedDashboard,
+} from "@/lib/dashboard-cache";
 import { toast } from "sonner";
 
 interface AdminDashboardData {
@@ -73,25 +78,50 @@ export default function AdminDashboardPage() {
   const [data, setData] = useState<AdminDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  async function loadDashboard() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/dashboard", { cache: "no-store" });
-      if (res.status === 401) {
-        router.replace("/login");
-        return;
-      }
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to load dashboard");
-      if (json.role !== "ADMIN" || !json.stats) {
-        router.replace("/guest/dashboard");
-        return;
-      }
-      setData(json);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load dashboard");
-    } finally {
+  async function loadDashboard(force = false) {
+    const cacheKey = "ADMIN";
+    const cached = !force ? getCachedDashboard<AdminDashboardData>(cacheKey) : null;
+
+    if (cached) {
+      setData(cached.data);
       setLoading(false);
+      if (cached.isFresh) return;
+    } else {
+      setLoading(true);
+    }
+
+    try {
+      const fetchFn = async () => {
+        const res = await fetch("/api/dashboard", { cache: "no-store" });
+        if (res.status === 401) {
+          return { redirect: "/login" as const };
+        }
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Failed to load dashboard");
+        if (json.role !== "ADMIN" || !json.stats) {
+          return { redirect: "/guest/dashboard" as const };
+        }
+        return { data: json as AdminDashboardData };
+      };
+
+      const result = force ? await fetchFn() : await fetchDashboardDeduped(cacheKey, fetchFn);
+      if ("redirect" in result && result.redirect) {
+        router.replace(result.redirect);
+        return;
+      }
+
+      if ("data" in result && result.data) {
+        setCachedDashboard(cacheKey, result.data);
+        setData(result.data);
+      }
+    } catch (err) {
+      if (!cached) {
+        toast.error(err instanceof Error ? err.message : "Failed to load dashboard");
+      }
+    } finally {
+      if (!cached) {
+        setLoading(false);
+      }
     }
   }
 

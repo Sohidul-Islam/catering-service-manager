@@ -37,6 +37,7 @@ import {
   invalidateCalendarCache,
   setCachedCalendar,
 } from "@/lib/calendar-cache";
+import { invalidateDashboardCache } from "@/lib/dashboard-cache";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -261,6 +262,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
         `Schedule synced for ${MONTH_NAMES[month - 1]} ${year} (${json.createdCount} new records)`
       );
       invalidateCalendarCache(cacheKey);
+      invalidateDashboardCache();
       fetchCalendar(true, true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Generation failed");
@@ -379,6 +381,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
           } else {
             invalidateCalendarCache(cacheKey);
           }
+          invalidateDashboardCache();
           await fetchCalendar(true, true);
         }
       } catch (err) {
@@ -465,6 +468,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
       toast.success(`Invoice ${affectedInvoice.invoiceNumber} recalculated`);
       setAffectedInvoice(null);
       invalidateCalendarCache(cacheKey);
+      invalidateDashboardCache();
       await fetchCalendar(true, true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Recalculation failed");
@@ -492,6 +496,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
       toast.success("Late adjustment request submitted for admin approval");
       setLateReason("");
       invalidateCalendarCache(cacheKey);
+      invalidateDashboardCache();
       await fetchCalendar(true, true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to submit");

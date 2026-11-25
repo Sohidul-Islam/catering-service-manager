@@ -8,6 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatBDT } from "@/lib/money";
+import { invalidateCalendarCache } from "@/lib/calendar-cache";
+import {
+  fetchDashboardDeduped,
+  getCachedDashboard,
+  invalidateDashboardCache,
+  setCachedDashboard,
+} from "@/lib/dashboard-cache";
 import { toast } from "sonner";
 
 interface GuestDashboardData {
@@ -51,25 +58,50 @@ export default function GuestDashboardPage() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seqRef = useRef(0);
 
-  async function loadDashboard(silent = false) {
-    if (!silent) setLoading(true);
+  async function loadDashboard(silent = false, force = false) {
+    const cacheKey = "GUEST";
+    const cached = !force ? getCachedDashboard<GuestDashboardData>(cacheKey) : null;
+
+    if (cached) {
+      setData(cached.data);
+      setLoading(false);
+      if (cached.isFresh) return;
+    } else if (!silent) {
+      setLoading(true);
+    }
+
     try {
-      const res = await fetch("/api/dashboard", { cache: "no-store" });
-      if (res.status === 401) {
-        router.replace("/login");
+      const fetchFn = async () => {
+        const res = await fetch("/api/dashboard", { cache: "no-store" });
+        if (res.status === 401) {
+          return { redirect: "/login" as const };
+        }
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Failed to load dashboard");
+        if (json.role !== "GUEST") {
+          return { redirect: "/admin/dashboard" as const };
+        }
+        return { data: json as GuestDashboardData };
+      };
+
+      const result = force ? await fetchFn() : await fetchDashboardDeduped(cacheKey, fetchFn);
+      if ("redirect" in result && result.redirect) {
+        router.replace(result.redirect);
         return;
       }
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to load dashboard");
-      if (json.role !== "GUEST") {
-        router.replace("/admin/dashboard");
-        return;
+
+      if ("data" in result && result.data) {
+        setCachedDashboard(cacheKey, result.data);
+        setData(result.data);
       }
-      setData(json);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load dashboard");
+      if (!cached) {
+        toast.error(err instanceof Error ? err.message : "Failed to load dashboard");
+      }
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent && !cached) {
+        setLoading(false);
+      }
     }
   }
 
@@ -111,10 +143,13 @@ export default function GuestDashboardPage() {
         if (!res.ok) throw new Error(json.error || "Update failed");
         if (seqRef.current === seq) {
           toast.success("Tomorrow's meal updated", { id: "tomorrow-meal-update" });
-          await loadDashboard(true);
+          invalidateDashboardCache("GUEST");
+          invalidateCalendarCache();
+          await loadDashboard(true, true);
         }
       } catch (err) {
         if (seqRef.current === seq) {
+          invalidateDashboardCache("GUEST");
           setData(prevData);
           toast.error(err instanceof Error ? err.message : "Failed to update", {
             id: "tomorrow-meal-update",
