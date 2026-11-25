@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatBDT } from "@/lib/money";
+import { invalidateCalendarCache } from "@/lib/calendar-cache";
 import { toast } from "sonner";
 
 interface GuestRow {
@@ -140,6 +141,7 @@ export default function AdminGuestsPage() {
       setName("");
       setEmail("");
       setPhone("");
+      invalidateCalendarCache();
       loadGuests();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to invite guest");
@@ -169,6 +171,7 @@ export default function AdminGuestsPage() {
       if (!res.ok) throw new Error(json.error || "Update failed");
       toast.success("Guest updated");
       setEditGuest(null);
+      invalidateCalendarCache();
       loadGuests();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Update failed");
@@ -420,8 +423,9 @@ export default function AdminGuestsPage() {
               />
               <p className="mt-1.5 text-xs text-slate-500">
                 Starting from <span className="font-medium text-slate-700">{mealStartDate}</span>:{" "}
-                {mealPreference === "REGULAR" ? defaultMealQty : 0} meal(s) will be scheduled on
-                applicable working days. Previous dates will not be included.
+                {mealPreference === "REGULAR" ? defaultMealQty : 0} meal(s) will be auto-scheduled
+                on applicable working days. Earlier dates are not auto-scheduled, though admins can
+                still add or adjust historical records in the Calendar.
               </p>
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -516,7 +520,8 @@ export default function AdminGuestsPage() {
                 className="mt-1"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Meals before this date will never be auto-scheduled or billed.
+                Meals before this date will not be auto-scheduled. Admins can still manually add or
+                adjust historical records in the Calendar.
               </p>
             </div>
             <div className="flex justify-end gap-2 pt-2">

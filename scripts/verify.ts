@@ -22,6 +22,7 @@ import {
   HolidayType,
   InvoiceStatus,
   MealPreference,
+  MealSource,
   PaymentMethod,
   PaymentType,
   UserRole,
@@ -437,6 +438,98 @@ async function run() {
     where: { userId_date: { userId: lateStarter.id, date: "2028-05-01" } },
   });
   assert.equal(may1?.quantity, 3, "Next month working day must inherit FOLLOWING_RULE (3 meals)");
+
+  // 12. Admin historical meal overrides before mealStartDate (and guest rejection)
+  await assert.rejects(
+    () =>
+      updateMealQuantity({
+        actorId: lateStarter.id,
+        actorRole: UserRole.GUEST,
+        targetUserId: lateStarter.id,
+        date: "2028-04-03",
+        quantity: 1,
+        now: beforeApr,
+      }),
+    MealServiceError,
+    "Guest must be blocked from modifying meals before mealStartDate"
+  );
+
+  await assert.rejects(
+    () =>
+      submitAdjustmentRequest({
+        userId: lateStarter.id,
+        date: "2028-04-03",
+        requestedQuantity: 1,
+        reason: "Historical request should fail for guest",
+      }),
+    MealServiceError,
+    "Guest must be blocked from submitting adjustment requests before mealStartDate"
+  );
+
+  await updateMealQuantity({
+    actorId: admin.id,
+    actorRole: UserRole.ADMIN,
+    targetUserId: lateStarter.id,
+    date: "2028-04-03",
+    quantity: 2,
+    scope: "SINGLE_DATE",
+    reason: "Admin adding old record",
+    now: beforeApr,
+  });
+
+  const apr03 = await prisma.mealRecord.findUnique({
+    where: { userId_date: { userId: lateStarter.id, date: "2028-04-03" } },
+  });
+  assert.equal(apr03?.quantity, 2, "Admin should be able to add historical record before mealStartDate");
+  assert.equal(apr03?.source, MealSource.ADMIN_OVERRIDE);
+
+  const apr04BeforeSync = await prisma.mealRecord.findUnique({
+    where: { userId_date: { userId: lateStarter.id, date: "2028-04-04" } },
+  });
+  assert.equal(apr04BeforeSync, null, "Other pre-start dates must remain unscheduled");
+
+  await ensureMonthSchedule(2028, 4, admin.id, true);
+  const [apr03AfterSync, apr04AfterSync] = await Promise.all([
+    prisma.mealRecord.findUnique({
+      where: { userId_date: { userId: lateStarter.id, date: "2028-04-03" } },
+    }),
+    prisma.mealRecord.findUnique({
+      where: { userId_date: { userId: lateStarter.id, date: "2028-04-04" } },
+    }),
+  ]);
+  assert.equal(apr03AfterSync?.quantity, 2, "Re-syncing schedule must preserve admin historical record");
+  assert.equal(apr04AfterSync, null, "Re-syncing schedule must still not auto-create untouched pre-start dates");
+
+  await updateMealQuantity({
+    actorId: admin.id,
+    actorRole: UserRole.ADMIN,
+    targetUserId: lateStarter.id,
+    date: "2028-04-12",
+    quantity: 1,
+    scope: "FOLLOWING_DATES",
+    reason: "Admin historical following rule",
+    now: beforeApr,
+  });
+
+  const [apr03Final, apr12, apr13, apr15] = await Promise.all([
+    prisma.mealRecord.findUnique({ where: { userId_date: { userId: lateStarter.id, date: "2028-04-03" } } }),
+    prisma.mealRecord.findUnique({ where: { userId_date: { userId: lateStarter.id, date: "2028-04-12" } } }),
+    prisma.mealRecord.findUnique({ where: { userId_date: { userId: lateStarter.id, date: "2028-04-13" } } }),
+    prisma.mealRecord.findUnique({ where: { userId_date: { userId: lateStarter.id, date: "2028-04-15" } } }),
+  ]);
+  assert.equal(apr03Final?.quantity, 2, "Earlier historical record must remain 2");
+  assert.equal(apr12?.quantity, 1, "Pre-start target date becomes 1");
+  assert.equal(apr13?.quantity, 1, "Pre-start following working day gets created with 1");
+  assert.equal(apr15, null, "Pre-start weekend must be skipped by historical FOLLOWING_DATES");
+
+  await generateMonthlyInvoices(2028, 4, admin.id);
+  const aprInvoice = await prisma.invoice.findUnique({
+    where: { userId_year_month: { userId: lateStarter.id, year: 2028, month: 4 } },
+    include: { items: true },
+  });
+  assert.ok(aprInvoice, "April invoice should be generated for lateStarter");
+  const apr03Item = aprInvoice.items.find((i) => i.date === "2028-04-03");
+  assert.equal(apr03Item?.quantity, 2, "April invoice must include admin-added historical 2028-04-03 meal record");
 
   // Clean up test data
   await prisma.emailLog.deleteMany({

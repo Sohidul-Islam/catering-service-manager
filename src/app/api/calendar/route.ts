@@ -37,44 +37,67 @@ export async function GET(req: NextRequest) {
 
     const isAdmin = user.role === UserRole.ADMIN;
 
-    const [holidays, prices, records, pendingRequests, sentConfirmationLogs] = await Promise.all([
-      prisma.holiday.findMany({
-        where: { date: { gte: startDate, lte: endDate } },
-      }),
-      prisma.mealPrice.findMany({
-        where: { date: { gte: startDate, lte: endDate } },
-      }),
-      prisma.mealRecord.findMany({
-        where: {
-          date: { gte: startDate, lte: endDate },
-          ...(isAdmin ? {} : { userId: user.id }),
-        },
-        include: {
-          user: {
-            select: { id: true, name: true, email: true, status: true, mealPreference: true },
+    const [holidays, prices, records, pendingRequests, sentConfirmationLogs, allGuests] =
+      await Promise.all([
+        prisma.holiday.findMany({
+          where: { date: { gte: startDate, lte: endDate } },
+        }),
+        prisma.mealPrice.findMany({
+          where: { date: { gte: startDate, lte: endDate } },
+        }),
+        prisma.mealRecord.findMany({
+          where: {
+            date: { gte: startDate, lte: endDate },
+            ...(isAdmin ? {} : { userId: user.id }),
           },
-        },
-        orderBy: [{ date: "asc" }, { user: { name: "asc" } }],
-      }),
-      prisma.mealAdjustmentRequest.findMany({
-        where: {
-          date: { gte: startDate, lte: endDate },
-          status: AdjustmentStatus.PENDING,
-          ...(isAdmin ? {} : { userId: user.id }),
-        },
-      }),
-      isAdmin
-        ? prisma.emailLog.findMany({
-            where: {
-              emailType: "MEAL_CONFIRMATION",
-              status: "SENT",
-              mealDate: { gte: startDate, lte: endDate },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                status: true,
+                mealPreference: true,
+                mealStartDate: true,
+              },
             },
-            orderBy: { sentAt: "desc" },
-            select: { guestId: true, mealDate: true, sentAt: true },
-          })
-        : Promise.resolve([]),
-    ]);
+          },
+          orderBy: [{ date: "asc" }, { user: { name: "asc" } }],
+        }),
+        prisma.mealAdjustmentRequest.findMany({
+          where: {
+            date: { gte: startDate, lte: endDate },
+            status: AdjustmentStatus.PENDING,
+            ...(isAdmin ? {} : { userId: user.id }),
+          },
+        }),
+        isAdmin
+          ? prisma.emailLog.findMany({
+              where: {
+                emailType: "MEAL_CONFIRMATION",
+                status: "SENT",
+                mealDate: { gte: startDate, lte: endDate },
+              },
+              orderBy: { sentAt: "desc" },
+              select: { guestId: true, mealDate: true, sentAt: true },
+            })
+          : Promise.resolve([]),
+        isAdmin
+          ? prisma.user.findMany({
+              where: { role: UserRole.GUEST },
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                status: true,
+                mealPreference: true,
+                defaultMealQty: true,
+                mealStartDate: true,
+              },
+              orderBy: { name: "asc" },
+            })
+          : Promise.resolve([]),
+      ]);
 
     const confirmationSentMap = new Map<string, string>();
     for (const log of sentConfirmationLogs) {
@@ -144,6 +167,7 @@ export async function GET(req: NextRequest) {
           guestName: r.user.name,
           guestEmail: r.user.email,
           guestStatus: r.user.status,
+          guestMealStartDate: r.user.mealStartDate ?? null,
           quantity: r.quantity,
           unitPricePoisha: r.unitPricePoisha,
           totalPoisha: r.quantity * r.unitPricePoisha,
@@ -164,6 +188,7 @@ export async function GET(req: NextRequest) {
       month,
       today: now.dateStr,
       guestMealStartDate: isAdmin ? null : user.mealStartDate ?? null,
+      ...(isAdmin ? { guests: allGuests } : {}),
       settings: {
         timezone: settings.timezone,
         defaultMealPricePoisha: settings.defaultMealPricePoisha,

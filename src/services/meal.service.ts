@@ -160,6 +160,8 @@ export async function updateMealQuantity(input: UpdateMealInput) {
       },
     });
 
+    const { year, month } = parseDateStr(date);
+
     let updatedFollowingCount = 0;
     if (scope === "FOLLOWING_DATES") {
       // Apply to all existing future working-day records from this date onward
@@ -171,7 +173,20 @@ export async function updateMealQuantity(input: UpdateMealInput) {
         },
       });
 
-      if (futureRecords.length > 0) {
+      const existingFutureDates = new Set(futureRecords.map((f) => f.date));
+      const monthDates = getMonthDateRange(year, month);
+      const shouldBackfillPreStart =
+        actorRole === UserRole.ADMIN &&
+        Boolean(targetUser.mealStartDate) &&
+        date < targetUser.mealStartDate! &&
+        quantity > 0;
+      const missingPreStartDates = shouldBackfillPreStart
+        ? monthDates.filter(
+            (d) => d > date && d < targetUser.mealStartDate! && !existingFutureDates.has(d)
+          )
+        : [];
+
+      if (futureRecords.length > 0 || missingPreStartDates.length > 0) {
         const futureHolidays = await tx.holiday.findMany({
           where: { date: { gt: date } },
         });
@@ -204,12 +219,39 @@ export async function updateMealQuantity(input: UpdateMealInput) {
           });
           updatedFollowingCount++;
         }
+
+        if (missingPreStartDates.length > 0) {
+          const monthPrices = await tx.mealPrice.findMany({
+            where: {
+              date: { gte: monthDates[0], lte: monthDates[monthDates.length - 1] },
+            },
+          });
+          const monthPriceMap = new Map(monthPrices.map((p) => [p.date, p.pricePoisha]));
+
+          for (const d of missingPreStartDates) {
+            if (!isWorkingDay(d, settings, futureHolidayMap)) {
+              continue;
+            }
+            await tx.mealRecord.create({
+              data: {
+                userId: targetUserId,
+                date: d,
+                quantity,
+                unitPricePoisha: resolveMealPrice(d, settings, monthPriceMap),
+                source: MealSource.FOLLOWING_RULE,
+                overrideScope: MealOverrideScope.FOLLOWING_DATES,
+                isCustomized: true,
+                isFinalized: false,
+              },
+            });
+            updatedFollowingCount++;
+          }
+        }
       }
     }
 
     // Check if an invoice already exists for this month; do NOT silently mutate it.
     // Instead, compute projected total so admin can explicitly confirm updating the invoice.
-    const { year, month } = parseDateStr(date);
     const existingInvoice = await tx.invoice.findUnique({
       where: { userId_year_month: { userId: targetUserId, year, month } },
     });
@@ -288,7 +330,22 @@ export async function submitAdjustmentRequest(params: {
     throw new MealServiceError("Requested quantity must be a non-negative integer.", 400);
   }
 
-  const settings = await getSettings();
+  const [settings, user] = await Promise.all([
+    getSettings(),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, mealStartDate: true },
+    }),
+  ]);
+  if (!user) {
+    throw new MealServiceError("User not found.", 404);
+  }
+  if (user.mealStartDate && date < user.mealStartDate) {
+    throw new MealServiceError(
+      `Cannot request meal adjustments before your meal start date (${user.mealStartDate}). Only an admin can adjust historical records.`,
+      400
+    );
+  }
   if (settings.maxMealQty != null && requestedQuantity > settings.maxMealQty) {
     throw new MealServiceError(
       `Requested quantity cannot exceed maximum (${settings.maxMealQty}).`,

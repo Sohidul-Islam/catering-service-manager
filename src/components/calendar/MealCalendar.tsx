@@ -47,6 +47,7 @@ export interface CalendarGuestRecord {
   guestName: string;
   guestEmail: string;
   guestStatus: string;
+  guestMealStartDate?: string | null;
   quantity: number;
   unitPricePoisha: number;
   totalPoisha: number;
@@ -54,6 +55,16 @@ export interface CalendarGuestRecord {
   overrideScope?: string | null;
   isCustomized: boolean;
   isFinalized: boolean;
+}
+
+export interface CalendarGuestSummary {
+  id: string;
+  name: string;
+  email: string;
+  status: string;
+  mealPreference: string;
+  defaultMealQty: number;
+  mealStartDate: string | null;
 }
 
 export interface CalendarDay {
@@ -88,6 +99,7 @@ interface CalendarResponse {
   month: number;
   today: string;
   guestMealStartDate?: string | null;
+  guests?: CalendarGuestSummary[];
   settings: {
     timezone: string;
     defaultMealPricePoisha: number;
@@ -139,6 +151,8 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
   // Admin override reason & adjustment email / invoice recalculation prompts
   const [applyScope, setApplyScope] = useState<"SINGLE_DATE" | "FOLLOWING_DATES">("SINGLE_DATE");
   const [overrideReason, setOverrideReason] = useState("");
+  const [showUnscheduledGuests, setShowUnscheduledGuests] = useState(false);
+  const [guestSearch, setGuestSearch] = useState("");
   const baselineQtyRef = useRef<Map<string, number>>(new Map());
   const [lastAdjustment, setLastAdjustment] = useState<{
     guestId: string;
@@ -285,8 +299,12 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
     const currentRecord = selectedDay?.records.find((r) =>
       userId ? r.userId === userId : true
     );
-    if (!baselineQtyRef.current.has(key) && currentRecord) {
-      baselineQtyRef.current.set(key, currentRecord.quantity);
+    const guestInfo =
+      mode === "ADMIN" && userId
+        ? data?.guests?.find((g) => g.id === userId)
+        : undefined;
+    if (!baselineQtyRef.current.has(key)) {
+      baselineQtyRef.current.set(key, currentRecord?.quantity ?? 0);
     }
 
     const applyOptimistic = (day: CalendarDay): CalendarDay => {
@@ -296,25 +314,60 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
 
       if (!isTargetDate && !isFollowingTarget) return day;
 
-      const updatedRecords = day.records.map((r) => {
-        const isMatch = userId ? r.userId === userId : true;
-        if (!isMatch) return r;
-        if (isFollowingTarget && mode === "GUEST" && day.isLocked) {
-          return r;
-        }
-        return {
-          ...r,
-          quantity: nextQty,
-          totalPoisha: nextQty * r.unitPricePoisha,
-          source: isFollowingTarget
-            ? "FOLLOWING_RULE"
-            : mode === "ADMIN"
-            ? "ADMIN_OVERRIDE"
-            : "GUEST_OVERRIDE",
-          overrideScope: selectedScope,
-          isCustomized: true,
-        };
-      });
+      const hasExistingMatch = day.records.some((r) => (userId ? r.userId === userId : true));
+      let updatedRecords: CalendarGuestRecord[];
+
+      if (hasExistingMatch) {
+        updatedRecords = day.records.map((r) => {
+          const isMatch = userId ? r.userId === userId : true;
+          if (!isMatch) return r;
+          if (isFollowingTarget && mode === "GUEST" && day.isLocked) {
+            return r;
+          }
+          return {
+            ...r,
+            quantity: nextQty,
+            totalPoisha: nextQty * r.unitPricePoisha,
+            source: isFollowingTarget
+              ? "FOLLOWING_RULE"
+              : mode === "ADMIN"
+              ? "ADMIN_OVERRIDE"
+              : "GUEST_OVERRIDE",
+            overrideScope: selectedScope,
+            isCustomized: true,
+          };
+        });
+      } else if (
+        mode === "ADMIN" &&
+        userId &&
+        guestInfo &&
+        (isTargetDate ||
+          (isFollowingTarget &&
+            nextQty > 0 &&
+            Boolean(guestInfo.mealStartDate) &&
+            day.date < guestInfo.mealStartDate!))
+      ) {
+        updatedRecords = [
+          ...day.records,
+          {
+            id: `temp-${userId}-${day.date}`,
+            userId,
+            guestName: guestInfo.name,
+            guestEmail: guestInfo.email,
+            guestStatus: guestInfo.status,
+            guestMealStartDate: guestInfo.mealStartDate,
+            quantity: nextQty,
+            unitPricePoisha: day.effectivePricePoisha,
+            totalPoisha: nextQty * day.effectivePricePoisha,
+            source: isFollowingTarget ? "FOLLOWING_RULE" : "ADMIN_OVERRIDE",
+            overrideScope: selectedScope,
+            isCustomized: true,
+            isFinalized: false,
+          },
+        ];
+      } else {
+        updatedRecords = day.records;
+      }
 
       const totalMeals = updatedRecords.reduce((s, r) => s + r.quantity, 0);
       const activeGuestsCount = updatedRecords.filter((r) => r.quantity > 0).length;
@@ -361,14 +414,20 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
           baselineQtyRef.current.delete(key);
           toast.success("Meal quantity updated", { id: "meal-update" });
 
-          if (mode === "ADMIN" && userId && currentRecord && baseQty !== nextQty) {
+          const resolvedGuestName = currentRecord?.guestName ?? guestInfo?.name;
+          const resolvedUnitPrice =
+            currentRecord?.unitPricePoisha ??
+            selectedDay?.effectivePricePoisha ??
+            data?.settings.defaultMealPricePoisha ??
+            0;
+          if (mode === "ADMIN" && userId && resolvedGuestName && baseQty !== nextQty) {
             setLastAdjustment({
               guestId: userId,
-              guestName: currentRecord.guestName,
+              guestName: resolvedGuestName,
               date: dateStr,
               previousQuantity: baseQty,
               newQuantity: nextQty,
-              unitPricePoisha: currentRecord.unitPricePoisha,
+              unitPricePoisha: resolvedUnitPrice,
               note: overrideReason.trim() || undefined,
             });
           }
@@ -526,6 +585,8 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
     setSelectedDay(day);
     setApplyScope("SINGLE_DATE");
     setOverrideReason("");
+    setShowUnscheduledGuests(day.records.length === 0);
+    setGuestSearch("");
     setLastAdjustment(null);
     setAffectedInvoice(null);
     const currentQty = day.records[0]?.quantity ?? 0;
@@ -557,14 +618,21 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
     }
 
     if (mode === "GUEST") {
+      const myQty = day.records[0]?.quantity ?? 0;
       if (data?.guestMealStartDate && day.date < data.guestMealStartDate) {
+        if (myQty > 0) {
+          return (
+            <Badge variant="danger" className="text-[10px] px-1.5 py-0">
+              <Lock className="h-3 w-3" /> Admin • {myQty}
+            </Badge>
+          );
+        }
         return (
           <Badge variant="muted" className="text-[10px] px-1.5 py-0">
             Not started
           </Badge>
         );
       }
-      const myQty = day.records[0]?.quantity ?? 0;
       if (day.myPendingRequest) {
         return (
           <Badge variant="warning" className="text-[10px] px-1.5 py-0">
@@ -793,12 +861,25 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
                         {day.holiday.name}
                       </p>
                     )}
-                    {day.isWorkingDay && (
+                    {(day.isWorkingDay ||
+                      (mode === "ADMIN" && day.totalMeals > 0) ||
+                      (mode === "GUEST" && myQty > 0)) && (
                       <>
                         {mode === "GUEST" &&
                         data?.guestMealStartDate &&
                         day.date < data.guestMealStartDate ? (
-                          <p className="text-[11px] text-slate-400">Before start date</p>
+                          myQty > 0 ? (
+                            <>
+                              <p className="text-xs font-semibold text-slate-800">
+                                {myQty} meal{myQty === 1 ? "" : "s"}
+                              </p>
+                              <p className="text-[10px] text-slate-500 font-medium">
+                                Admin record
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-[11px] text-slate-400">Before start date</p>
+                          )
                         ) : (
                           <p className="text-xs font-semibold text-slate-800">
                             {mode === "ADMIN"
@@ -820,11 +901,13 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
                           )}
                       </>
                     )}
-                    {mode === "ADMIN" && day.isWorkingDay && day.totalAmountPoisha > 0 && (
-                      <p className="text-[11px] text-slate-500">
-                        {formatBDT(day.totalAmountPoisha)}
-                      </p>
-                    )}
+                    {mode === "ADMIN" &&
+                      (day.isWorkingDay || day.totalMeals > 0) &&
+                      day.totalAmountPoisha > 0 && (
+                        <p className="text-[11px] text-slate-500">
+                          {formatBDT(day.totalAmountPoisha)}
+                        </p>
+                      )}
                   </div>
 
                   <div>{renderDayStatusBadge(day)}</div>
@@ -842,6 +925,11 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
         ) : (
           days.map((day) => {
             const dow = WEEKDAYS[getDayOfWeekUtc(day.date)];
+            const myQty = day.records[0]?.quantity ?? 0;
+            const isBeforeGuestStart =
+              mode === "GUEST" &&
+              Boolean(data?.guestMealStartDate) &&
+              day.date < data!.guestMealStartDate!;
             return (
               <Card
                 key={day.date}
@@ -860,14 +948,19 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
                     <span>Price: {formatBDT(day.effectivePricePoisha)}</span>
-                    {day.isWorkingDay && (
-                      <span>
-                        •{" "}
-                        {mode === "ADMIN"
-                          ? `${day.totalMeals} meals`
-                          : `${day.records[0]?.quantity ?? 0} meal(s)`}
-                      </span>
+                    {mode === "ADMIN" && (day.isWorkingDay || day.totalMeals > 0) && (
+                      <span>• {day.totalMeals} meals</span>
                     )}
+                    {mode === "GUEST" &&
+                      (isBeforeGuestStart ? (
+                        myQty > 0 ? (
+                          <span>• {myQty} meal(s)</span>
+                        ) : day.isWorkingDay ? (
+                          <span>• Before start date</span>
+                        ) : null
+                      ) : day.isWorkingDay || myQty > 0 ? (
+                        <span>• {myQty} meal(s)</span>
+                      ) : null)}
                   </div>
                   {day.holiday && (
                     <p className="mt-0.5 text-xs text-slate-600">{day.holiday.name}</p>
@@ -1020,74 +1113,199 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
                   </div>
                 )}
 
-                {selectedDay.records.length === 0 ? (
-                  <p className="text-sm text-slate-500 py-4 text-center">
-                    No meal records generated for this date yet. Click &ldquo;Generate Schedule&rdquo; to initialize.
-                  </p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Guest</TableHead>
-                        <TableHead className="text-right">Quantity</TableHead>
-                        <TableHead className="text-right">Unit Price</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {selectedDay.records.map((rec) => (
-                        <TableRow key={rec.id}>
-                          <TableCell>
-                            <p className="font-medium text-slate-900">{rec.guestName}</p>
-                            <p className="text-xs text-slate-500">{rec.guestEmail}</p>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="inline-flex items-center gap-1.5">
-                              <Button
-                                size="icon"
-                                variant="outline"
-                                className="h-7 w-7"
-                                disabled={rec.quantity <= 0}
-                                onClick={() =>
-                                  handleUpdateMeal(
-                                    selectedDay.date,
-                                    rec.quantity - 1,
-                                    rec.userId
-                                  )
-                                }
-                              >
-                                <Minus className="h-3 w-3" />
-                              </Button>
-                              <span className="w-7 text-center font-semibold text-slate-900">
-                                {rec.quantity}
-                              </span>
-                              <Button
-                                size="icon"
-                                variant="outline"
-                                className="h-7 w-7"
-                                onClick={() =>
-                                  handleUpdateMeal(
-                                    selectedDay.date,
-                                    rec.quantity + 1,
-                                    rec.userId
-                                  )
-                                }
-                              >
-                                <Plus className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {formatBDT(rec.unitPricePoisha)}
-                          </TableCell>
-                          <TableCell className="text-right font-semibold">
-                            {formatBDT(rec.totalPoisha)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+                {(() => {
+                  const recordByUserId = new Map(selectedDay.records.map((r) => [r.userId, r]));
+                  const allGuests = data?.guests ?? [];
+                  const missingGuests = allGuests.filter((g) => !recordByUserId.has(g.id));
+
+                  type DisplayRow = CalendarGuestRecord & { hasRecord: boolean };
+
+                  const combinedRows: DisplayRow[] = [
+                    ...selectedDay.records.map((r) => ({ ...r, hasRecord: true })),
+                    ...(showUnscheduledGuests
+                      ? missingGuests.map((g) => ({
+                          id: `virtual-${g.id}`,
+                          userId: g.id,
+                          guestName: g.name,
+                          guestEmail: g.email,
+                          guestStatus: g.status,
+                          guestMealStartDate: g.mealStartDate,
+                          quantity: 0,
+                          unitPricePoisha: selectedDay.effectivePricePoisha,
+                          totalPoisha: 0,
+                          source: undefined,
+                          overrideScope: null,
+                          isCustomized: false,
+                          isFinalized: false,
+                          hasRecord: false,
+                        }))
+                      : []),
+                  ].sort((a, b) => a.guestName.localeCompare(b.guestName));
+
+                  const searchLower = guestSearch.trim().toLowerCase();
+                  const filteredRows = searchLower
+                    ? combinedRows.filter(
+                        (r) =>
+                          r.guestName.toLowerCase().includes(searchLower) ||
+                          r.guestEmail.toLowerCase().includes(searchLower)
+                      )
+                    : combinedRows;
+
+                  const hasBeforeStartRows = combinedRows.some(
+                    (r) => r.guestMealStartDate && selectedDay.date < r.guestMealStartDate
+                  );
+
+                  if (allGuests.length === 0 && selectedDay.records.length === 0) {
+                    return (
+                      <p className="text-sm text-slate-500 py-4 text-center">
+                        No guests found in the system yet. Invite guests from the Guests page first.
+                      </p>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-3">
+                      {showUnscheduledGuests &&
+                        (missingGuests.length > 0 || hasBeforeStartRows) && (
+                          <div className="rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-2 text-xs text-blue-900">
+                            Admins can add or adjust historical/unscheduled meal records here
+                            (including dates before a guest&rsquo;s Meal Start Date). Guests cannot
+                            modify dates prior to their start date.
+                          </div>
+                        )}
+
+                      {(allGuests.length > 5 || combinedRows.length > 5) && (
+                        <Input
+                          value={guestSearch}
+                          onChange={(e) => setGuestSearch(e.target.value)}
+                          placeholder="Filter guests by name or email..."
+                          className="h-8 text-xs"
+                        />
+                      )}
+
+                      {filteredRows.length === 0 ? (
+                        <p className="text-sm text-slate-500 py-4 text-center">
+                          No matching guests.
+                        </p>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Guest</TableHead>
+                              <TableHead className="text-right">Quantity</TableHead>
+                              <TableHead className="text-right">Unit Price</TableHead>
+                              <TableHead className="text-right">Total</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredRows.map((rec) => {
+                              const isBeforeStart =
+                                Boolean(rec.guestMealStartDate) &&
+                                selectedDay.date < rec.guestMealStartDate!;
+                              return (
+                                <TableRow key={rec.userId}>
+                                  <TableCell>
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <p className="font-medium text-slate-900">{rec.guestName}</p>
+                                      {isBeforeStart && (
+                                        <Badge variant="warning" className="text-[10px] px-1.5 py-0">
+                                          Before start ({rec.guestMealStartDate})
+                                        </Badge>
+                                      )}
+                                      {rec.guestStatus !== "ACTIVE" && (
+                                        <Badge variant="muted" className="text-[10px] px-1.5 py-0">
+                                          {rec.guestStatus === "INVITED" ? "Invited" : "Inactive"}
+                                        </Badge>
+                                      )}
+                                      {!rec.hasRecord && !isBeforeStart && (
+                                        <Badge variant="muted" className="text-[10px] px-1.5 py-0">
+                                          No record yet
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-slate-500">{rec.guestEmail}</p>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <div className="inline-flex items-center gap-1.5">
+                                      <Button
+                                        size="icon"
+                                        variant="outline"
+                                        className="h-7 w-7"
+                                        disabled={rec.quantity <= 0}
+                                        onClick={() =>
+                                          handleUpdateMeal(
+                                            selectedDay.date,
+                                            rec.quantity - 1,
+                                            rec.userId
+                                          )
+                                        }
+                                      >
+                                        <Minus className="h-3 w-3" />
+                                      </Button>
+                                      <span className="w-7 text-center font-semibold text-slate-900">
+                                        {rec.quantity}
+                                      </span>
+                                      <Button
+                                        size="icon"
+                                        variant="outline"
+                                        className="h-7 w-7"
+                                        onClick={() =>
+                                          handleUpdateMeal(
+                                            selectedDay.date,
+                                            rec.quantity + 1,
+                                            rec.userId
+                                          )
+                                        }
+                                      >
+                                        <Plus className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    {formatBDT(rec.unitPricePoisha)}
+                                  </TableCell>
+                                  <TableCell className="text-right font-semibold">
+                                    {formatBDT(rec.totalPoisha)}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      )}
+
+                      {missingGuests.length > 0 && !showUnscheduledGuests && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                          <span>
+                            {missingGuests.length} other guest(s) have no record on this date
+                            (e.g. before Meal Start Date).
+                          </span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setShowUnscheduledGuests(true)}
+                          >
+                            Show All Guests (+{missingGuests.length})
+                          </Button>
+                        </div>
+                      )}
+
+                      {showUnscheduledGuests && selectedDay.records.length > 0 && (
+                        <div className="flex justify-end">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setShowUnscheduledGuests(false)}
+                          >
+                            Show Recorded Only
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             ) : (
               // GUEST DETAIL VIEW
@@ -1097,11 +1315,43 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
                   const qty = rec?.quantity ?? 0;
 
                   if (data?.guestMealStartDate && selectedDay.date < data.guestMealStartDate) {
+                    if (qty > 0) {
+                      return (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-4">
+                            <div>
+                              <p className="text-xs font-medium text-slate-500">
+                                Historical Meal (Admin Recorded)
+                              </p>
+                              <p className="text-xl font-bold text-slate-900 mt-0.5">
+                                {qty} meal{qty > 1 ? "s" : ""}
+                              </p>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Cost:{" "}
+                                {formatBDT(
+                                  qty * (rec?.unitPricePoisha ?? selectedDay.effectivePricePoisha)
+                                )}
+                              </p>
+                            </div>
+                            <Badge variant="danger">
+                              <Lock className="h-3.5 w-3.5" /> Locked
+                            </Badge>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                            This date is before your Meal Start Date (
+                            <span className="font-semibold">{data.guestMealStartDate}</span>). This
+                            historical meal record was added by an admin and can only be adjusted by
+                            an admin.
+                          </div>
+                        </div>
+                      );
+                    }
                     return (
                       <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
                         This date is before your Meal Start Date (
                         <span className="font-semibold">{data.guestMealStartDate}</span>). Meals
-                        are not scheduled or billed prior to your start date.
+                        are not auto-scheduled prior to your start date, and only an admin can add
+                        or adjust historical records.
                       </div>
                     );
                   }
