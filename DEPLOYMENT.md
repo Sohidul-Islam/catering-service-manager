@@ -1,53 +1,44 @@
-# Deployment Guide (Vercel + PostgreSQL)
+# Deployment Guide (Vercel + Turso SQLite)
 
-Local SQLite (`file:./dev.db`) works for local development, **but Vercel serverless functions do not have persistent disk storage**. For Vercel production, use a managed PostgreSQL database (Neon, Supabase, or Vercel Postgres).
+This application stays on **SQLite** using **Turso (libSQL)** in production so it works seamlessly on Vercel's serverless platform.
 
-## 1. Switch Prisma Datasource to PostgreSQL
+- When `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are set, Prisma connects to Turso via `@prisma/adapter-libsql`.
+- When `TURSO_DATABASE_URL` is omitted locally, Prisma falls back to local `DATABASE_URL` (`file:./dev.db`).
 
-1. Open `prisma/schema.prisma` and change:
-   ```prisma
-   datasource db {
-     provider = "postgresql"
-     url      = env("DATABASE_URL")
-   }
-   ```
-2. Push the schema to your PostgreSQL database:
-   ```bash
-   npx prisma db push
-   ```
-   *(Or generate fresh PostgreSQL migrations after removing the SQLite `prisma/migrations` folder: `npx prisma migrate dev --name init`.)*
+## 1. Push Schema & Seed Admin to Turso
 
-## 2. Seed Only 1 Fresh Admin Account (No Demo Guests)
-
-Set your initial admin credentials and run the production-safe seed:
+With `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` set in `.env`:
 
 ```bash
-INITIAL_ADMIN_EMAIL="admin@yourcompany.com" \
-INITIAL_ADMIN_PASSWORD="StrongTempPassword123!" \
-npm run db:seed
+npm run db:push-turso
+INITIAL_ADMIN_EMAIL="admin@yourcompany.com" INITIAL_ADMIN_PASSWORD="StrongPassword123!" npm run db:seed
 ```
 
-> **Note:** To wipe an existing database back to a clean slate with only 1 admin and zero guests/meals/invoices, run:
+> To wipe all guests, meals, invoices, and payments back to 1 clean admin:
 > ```bash
-> npm run db:reset-fresh
+> npm run reset-db
 > ```
 
-After signing in on `/login`, go to **Settings → Admin Account & Credentials** to change the admin name, email, or password anytime.
+## 2. Configure Environment Variables in Vercel
 
-## 3. Configure Vercel Project
+Import the GitHub repo in Vercel (**Project Settings → Environment Variables**) and add:
 
-1. Push the repository to GitHub and import it in **Vercel**.
-2. Add **Environment Variables** in Vercel → **Project Settings**:
-   - `DATABASE_URL` (PostgreSQL connection string from Neon / Supabase)
-   - `JWT_SECRET` (generate with `openssl rand -hex 32`)
-   - `CRON_SECRET` (generate with `openssl rand -hex 32` — also used by `vercel.json` cron)
-   - `RESEND_API_KEY` (from Resend dashboard)
-   - `RESEND_FROM_EMAIL` (your verified sender email)
-   - `RESEND_FROM_NAME` (e.g., `Office Meal Management`)
-   - `NEXT_PUBLIC_APP_URL` (e.g., `https://your-app.vercel.app`)
-   - `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` (optional, for initial seeding)
-3. Set the Vercel **Build Command** (or keep `npm run build` since `postinstall` already runs `prisma generate`):
-   ```bash
-   npx prisma db push && npm run build
-   ```
-4. Deploy! `vercel.json` automatically configures a monthly cron job on the 1st of every month to call `/api/cron/generate-monthly-schedule`.
+- `TURSO_DATABASE_URL` = `libsql://...turso.io`
+- `TURSO_AUTH_TOKEN` = your Turso auth token
+- `JWT_SECRET` = long random string (`openssl rand -hex 32`)
+- `CRON_SECRET` = long random string (`openssl rand -hex 32`)
+- `NEXT_PUBLIC_APP_URL` = `https://your-project.vercel.app`
+- `RESEND_API_KEY` = your Resend API key
+- `RESEND_FROM_EMAIL` = your verified Resend sender email
+- `RESEND_FROM_NAME` = `Office Meal Management`
+- `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` *(optional if seeding during build)*
+
+## 3. Vercel Build Command
+
+Keep default `npm run build` (if you already ran `db:push-turso` & `db:seed` above), **or** set the Build Command in Vercel to:
+
+```bash
+npm run db:push-turso && npm run db:seed && npm run build
+```
+
+Both `db:push-turso` and `db:seed` are idempotent and safe to run on every deploy.
