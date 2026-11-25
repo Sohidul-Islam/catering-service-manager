@@ -166,18 +166,24 @@ export async function ensureMonthSchedule(
   year: number,
   month: number,
   actorId?: string | null,
-  forceLog = false
+  forceLog = false,
+  existingSettings?: OrganizationSettings
 ) {
-  const settings = await getSettings();
+  const existingSchedule = await prisma.monthlyMealSchedule.findUnique({
+    where: { year_month: { year, month } },
+  });
+
+  if (existingSchedule && !forceLog) {
+    return { schedule: existingSchedule, createdCount: 0 };
+  }
+
   const dates = getMonthDateRange(year, month);
   const startDate = dates[0];
   const endDate = dates[dates.length - 1];
 
-  const [existingSchedule, holidays, mealPrices, activeGuests, existingRecords, followingRules] =
+  const [settings, holidays, mealPrices, activeGuests, existingRecords, followingRules] =
     await Promise.all([
-      prisma.monthlyMealSchedule.findUnique({
-        where: { year_month: { year, month } },
-      }),
+      existingSettings ? Promise.resolve(existingSettings) : getSettings(),
       prisma.holiday.findMany({
         where: { date: { gte: startDate, lte: endDate } },
       }),
@@ -256,20 +262,23 @@ export async function ensureMonthSchedule(
 
   await insertMealRecordsIdempotently(toCreate);
 
-  const schedule = await prisma.monthlyMealSchedule.upsert({
-    where: { year_month: { year, month } },
-    update: forceLog
-      ? {
-          generatedAt: new Date(),
-          generatedById: actorId ?? existingSchedule?.generatedById ?? null,
-        }
-      : {},
-    create: {
-      year,
-      month,
-      generatedById: actorId ?? null,
-    },
-  });
+  const schedule =
+    !existingSchedule || forceLog
+      ? await prisma.monthlyMealSchedule.upsert({
+          where: { year_month: { year, month } },
+          update: forceLog
+            ? {
+                generatedAt: new Date(),
+                generatedById: actorId ?? existingSchedule?.generatedById ?? null,
+              }
+            : {},
+          create: {
+            year,
+            month,
+            generatedById: actorId ?? null,
+          },
+        })
+      : existingSchedule;
 
   if ((!existingSchedule || forceLog || toCreate.length > 0) && actorId) {
     await logActivity({
@@ -284,27 +293,17 @@ export async function ensureMonthSchedule(
   return { schedule, createdCount: toCreate.length };
 }
 
-/**
- * Generates remaining/missing schedule records for a newly activated guest
- * from their mealStartDate onward without touching any other guest's records.
- */
-export async function syncGuestMonthSchedule(userId: string, year: number, month: number) {
-  const guest = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      status: true,
-      role: true,
-      mealPreference: true,
-      defaultMealQty: true,
-      mealStartDate: true,
-    },
-  });
-  if (!guest || guest.role !== UserRole.GUEST || guest.status !== UserStatus.ACTIVE) {
-    return 0;
-  }
-
-  const settings = await getSettings();
+async function syncGuestSingleMonth(
+  guest: {
+    id: string;
+    mealPreference: MealPreference;
+    defaultMealQty: number;
+    mealStartDate: string | null;
+  },
+  settings: OrganizationSettings,
+  year: number,
+  month: number
+) {
   const dates = getMonthDateRange(year, month);
   const startDate = dates[0];
   const endDate = dates[dates.length - 1];
@@ -313,12 +312,12 @@ export async function syncGuestMonthSchedule(userId: string, year: number, month
     prisma.holiday.findMany({ where: { date: { gte: startDate, lte: endDate } } }),
     prisma.mealPrice.findMany({ where: { date: { gte: startDate, lte: endDate } } }),
     prisma.mealRecord.findMany({
-      where: { userId, date: { gte: startDate, lte: endDate } },
+      where: { userId: guest.id, date: { gte: startDate, lte: endDate } },
       select: { date: true },
     }),
     prisma.mealRuleHistory.findMany({
       where: {
-        userId,
+        userId: guest.id,
         scope: MealOverrideScope.FOLLOWING_DATES,
         effectiveFrom: { lte: endDate },
       },
@@ -340,7 +339,7 @@ export async function syncGuestMonthSchedule(userId: string, year: number, month
     const unitPricePoisha = resolveMealPrice(dateStr, settings, priceMap);
 
     toCreate.push({
-      userId,
+      userId: guest.id,
       date: dateStr,
       quantity: working ? rule.quantity : 0,
       unitPricePoisha,
@@ -352,6 +351,43 @@ export async function syncGuestMonthSchedule(userId: string, year: number, month
   }
 
   await insertMealRecordsIdempotently(toCreate);
-
   return toCreate.length;
+}
+
+/**
+ * Generates remaining/missing schedule records for a newly activated guest
+ * from their mealStartDate onward (including any pre-generated future months)
+ * without touching any other guest's records.
+ */
+export async function syncGuestMonthSchedule(userId: string, year: number, month: number) {
+  const [guest, settings, futureSchedules] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        status: true,
+        role: true,
+        mealPreference: true,
+        defaultMealQty: true,
+        mealStartDate: true,
+      },
+    }),
+    getSettings(),
+    prisma.monthlyMealSchedule.findMany({
+      where: {
+        OR: [{ year: { gt: year } }, { year, month: { gt: month } }],
+      },
+      select: { year: true, month: true },
+    }),
+  ]);
+  if (!guest || guest.role !== UserRole.GUEST || guest.status !== UserStatus.ACTIVE) {
+    return 0;
+  }
+
+  const targetMonths = [{ year, month }, ...futureSchedules];
+  const counts = await Promise.all(
+    targetMonths.map((m) => syncGuestSingleMonth(guest, settings, m.year, m.month))
+  );
+
+  return counts.reduce((sum, c) => sum + c, 0);
 }

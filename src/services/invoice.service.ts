@@ -60,110 +60,155 @@ export async function generateMonthlyInvoices(
   const startDate = dates[0];
   const endDate = dates[dates.length - 1];
 
-  const guests = await prisma.user.findMany({
-    where: {
-      role: UserRole.GUEST,
-      mealRecords: {
-        some: {
-          date: { gte: startDate, lte: endDate },
+  const [guests, allRecords, existingInvoices] = await Promise.all([
+    prisma.user.findMany({
+      where: {
+        role: UserRole.GUEST,
+        mealRecords: {
+          some: {
+            date: { gte: startDate, lte: endDate },
+          },
         },
       },
-    },
-    select: { id: true, name: true },
-  });
+      select: { id: true, name: true },
+    }),
+    prisma.mealRecord.findMany({
+      where: {
+        date: { gte: startDate, lte: endDate },
+        user: { role: UserRole.GUEST },
+      },
+      orderBy: { date: "asc" },
+    }),
+    prisma.invoice.findMany({
+      where: { year, month },
+      include: { items: true, payments: true },
+    }),
+  ]);
 
+  const recordsByGuest = new Map<string, typeof allRecords>();
+  for (const rec of allRecords) {
+    const list = recordsByGuest.get(rec.userId) ?? [];
+    list.push(rec);
+    recordsByGuest.set(rec.userId, list);
+  }
+
+  const invoiceByGuest = new Map(existingInvoices.map((inv) => [inv.userId, inv]));
+  const unfinalizedIds: string[] = [];
   const generatedInvoices = [];
 
   for (const guest of guests) {
-    const inv = await prisma.$transaction(async (tx) => {
-      const records = await tx.mealRecord.findMany({
-        where: {
+    const records = recordsByGuest.get(guest.id) ?? [];
+    const existingInvoice = invoiceByGuest.get(guest.id);
+
+    const invoice =
+      existingInvoice ??
+      (await prisma.invoice.create({
+        data: {
+          invoiceNumber: buildInvoiceNumber(year, month, guest.id),
           userId: guest.id,
-          date: { gte: startDate, lte: endDate },
-        },
-        orderBy: { date: "asc" },
-      });
-
-      let invoice = await tx.invoice.findUnique({
-        where: { userId_year_month: { userId: guest.id, year, month } },
-        include: { items: true, payments: true },
-      });
-
-      if (!invoice) {
-        invoice = await tx.invoice.create({
-          data: {
-            invoiceNumber: buildInvoiceNumber(year, month, guest.id),
-            userId: guest.id,
-            year,
-            month,
-          },
-          include: { items: true, payments: true },
-        });
-      }
-
-      const existingItemsByRecord = new Map(
-        invoice.items.map((item) => [item.mealRecordId, item])
-      );
-
-      for (const rec of records) {
-        const itemTotal = rec.quantity * rec.unitPricePoisha;
-        const existingItem = existingItemsByRecord.get(rec.id);
-
-        if (existingItem) {
-          await tx.invoiceItem.update({
-            where: { id: existingItem.id },
-            data: {
-              quantity: rec.quantity,
-              unitPricePoisha: rec.unitPricePoisha,
-              totalAmountPoisha: itemTotal,
-              isPaid: itemTotal === 0 ? true : existingItem.paidAmountPoisha >= itemTotal,
-            },
-          });
-        } else {
-          await tx.invoiceItem.create({
-            data: {
-              invoiceId: invoice.id,
-              mealRecordId: rec.id,
-              date: rec.date,
-              quantity: rec.quantity,
-              unitPricePoisha: rec.unitPricePoisha,
-              totalAmountPoisha: itemTotal,
-              paidAmountPoisha: 0,
-              isPaid: itemTotal === 0,
-            },
-          });
-        }
-
-        if (!rec.isFinalized) {
-          await tx.mealRecord.update({
-            where: { id: rec.id },
-            data: { isFinalized: true },
-          });
-        }
-      }
-
-      const updated = await recalculateInvoice(invoice.id, tx);
-
-      await logActivity({
-        tx,
-        actorId,
-        targetUserId: guest.id,
-        action: "GENERATE_INVOICE",
-        entityType: "Invoice",
-        entityId: invoice.id,
-        newValue: JSON.stringify({
-          invoiceNumber: invoice.invoiceNumber,
           year,
           month,
-          totalMeals: updated?.totalMeals ?? 0,
-          totalAmountPoisha: updated?.totalAmountPoisha ?? 0,
-        }),
-      });
+        },
+        include: { items: true, payments: true },
+      }));
 
-      return updated;
+    const existingItemsByRecord = new Map(
+      invoice.items.map((item) => [item.mealRecordId, item])
+    );
+
+    const itemsToCreate: Prisma.InvoiceItemCreateManyInput[] = [];
+    const itemUpdates: Promise<unknown>[] = [];
+
+    let totalMeals = 0;
+    let totalAmountPoisha = 0;
+
+    for (const rec of records) {
+      const itemTotal = rec.quantity * rec.unitPricePoisha;
+      totalMeals += rec.quantity;
+      totalAmountPoisha += itemTotal;
+
+      if (!rec.isFinalized) {
+        unfinalizedIds.push(rec.id);
+      }
+
+      const existingItem = existingItemsByRecord.get(rec.id);
+      if (existingItem) {
+        const nextIsPaid = itemTotal === 0 ? true : existingItem.paidAmountPoisha >= itemTotal;
+        if (
+          existingItem.quantity !== rec.quantity ||
+          existingItem.unitPricePoisha !== rec.unitPricePoisha ||
+          existingItem.totalAmountPoisha !== itemTotal ||
+          existingItem.isPaid !== nextIsPaid
+        ) {
+          itemUpdates.push(
+            prisma.invoiceItem.update({
+              where: { id: existingItem.id },
+              data: {
+                quantity: rec.quantity,
+                unitPricePoisha: rec.unitPricePoisha,
+                totalAmountPoisha: itemTotal,
+                isPaid: nextIsPaid,
+              },
+            })
+          );
+        }
+      } else {
+        itemsToCreate.push({
+          invoiceId: invoice.id,
+          mealRecordId: rec.id,
+          date: rec.date,
+          quantity: rec.quantity,
+          unitPricePoisha: rec.unitPricePoisha,
+          totalAmountPoisha: itemTotal,
+          paidAmountPoisha: 0,
+          isPaid: itemTotal === 0,
+        });
+      }
+    }
+
+    if (itemsToCreate.length > 0) {
+      await prisma.invoiceItem.createMany({ data: itemsToCreate });
+    }
+    if (itemUpdates.length > 0) {
+      await Promise.all(itemUpdates);
+    }
+
+    const paidAmountPoisha = invoice.payments.reduce((sum, p) => sum + p.amountPoisha, 0);
+    const status = computeInvoiceStatus(totalAmountPoisha, paidAmountPoisha);
+
+    const updated = await prisma.invoice.update({
+      where: { id: invoice.id },
+      data: {
+        totalMeals,
+        totalAmountPoisha,
+        paidAmountPoisha,
+        status,
+      },
     });
 
-    if (inv) generatedInvoices.push(inv);
+    await logActivity({
+      actorId,
+      targetUserId: guest.id,
+      action: "GENERATE_INVOICE",
+      entityType: "Invoice",
+      entityId: invoice.id,
+      newValue: JSON.stringify({
+        invoiceNumber: invoice.invoiceNumber,
+        year,
+        month,
+        totalMeals: updated.totalMeals,
+        totalAmountPoisha: updated.totalAmountPoisha,
+      }),
+    });
+
+    generatedInvoices.push(updated);
+  }
+
+  if (unfinalizedIds.length > 0) {
+    await prisma.mealRecord.updateMany({
+      where: { id: { in: unfinalizedIds } },
+      data: { isFinalized: true },
+    });
   }
 
   return generatedInvoices;

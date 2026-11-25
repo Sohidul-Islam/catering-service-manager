@@ -49,7 +49,16 @@ export async function updateMealQuantity(input: UpdateMealInput) {
     throw new MealServiceError("Forbidden. Guests can only modify their own meals.", 403);
   }
 
-  const settings = await getSettings();
+  const [settings, targetUser, holiday, mealPriceRecord] = await Promise.all([
+    getSettings(),
+    prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, status: true, role: true, mealStartDate: true },
+    }),
+    prisma.holiday.findUnique({ where: { date } }),
+    prisma.mealPrice.findUnique({ where: { date } }),
+  ]);
+
   if (settings.maxMealQty != null && quantity > settings.maxMealQty) {
     throw new MealServiceError(
       `Meal quantity cannot exceed maximum allowed (${settings.maxMealQty}).`,
@@ -57,10 +66,6 @@ export async function updateMealQuantity(input: UpdateMealInput) {
     );
   }
 
-  const targetUser = await prisma.user.findUnique({
-    where: { id: targetUserId },
-    select: { id: true, status: true, role: true, mealStartDate: true },
-  });
   if (!targetUser) {
     throw new MealServiceError("Guest not found.", 404);
   }
@@ -76,7 +81,6 @@ export async function updateMealQuantity(input: UpdateMealInput) {
     );
   }
 
-  const holiday = await prisma.holiday.findUnique({ where: { date } });
   const holidayMap = new Map(holiday ? [[holiday.date, holiday]] : []);
   const working = isWorkingDay(date, settings, holidayMap);
 
@@ -104,7 +108,6 @@ export async function updateMealQuantity(input: UpdateMealInput) {
     );
   }
 
-  const mealPriceRecord = await prisma.mealPrice.findUnique({ where: { date } });
   const priceMap = new Map(mealPriceRecord ? [[date, mealPriceRecord.pricePoisha]] : []);
   const resolvedPrice = resolveMealPrice(date, settings, priceMap);
 

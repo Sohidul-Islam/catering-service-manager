@@ -13,7 +13,7 @@ export interface SendLoggedEmailParams {
   mealDate?: string | null;
   invoiceId?: string | null;
   paymentId?: string | null;
-  sentById: string;
+  sentById?: string | null;
   isResend?: boolean;
 }
 
@@ -41,7 +41,7 @@ export async function sendAndLogEmail(params: SendLoggedEmailParams) {
       mealDate: mealDate ?? null,
       invoiceId: invoiceId ?? null,
       paymentId: paymentId ?? null,
-      sentById,
+      sentById: sentById ?? null,
       status: EmailStatus.PENDING,
     },
   });

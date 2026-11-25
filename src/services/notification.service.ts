@@ -66,56 +66,88 @@ export async function sendMealConfirmationEmails(params: {
   guestIds: string[];
   date: string;
   note?: string;
-  sentById: string;
+  sentById?: string | null;
 }) {
   const uniqueGuestIds = Array.from(new Set(params.guestIds));
-  const results = [];
+  if (uniqueGuestIds.length === 0) return [];
 
-  for (const guestId of uniqueGuestIds) {
-    try {
-      const preview = await previewMealConfirmation({
-        guestId,
-        date: params.date,
-        note: params.note,
-      });
-
-      const priorSent = await prisma.emailLog.findFirst({
-        where: {
-          emailType: EmailType.MEAL_CONFIRMATION,
-          guestId,
-          mealDate: params.date,
-          status: "SENT",
-        },
-      });
-
-      const res = await sendAndLogEmail({
+  const [records, priorSentLogs] = await Promise.all([
+    prisma.mealRecord.findMany({
+      where: { userId: { in: uniqueGuestIds }, date: params.date },
+      include: { user: { select: { id: true, name: true, email: true } } },
+    }),
+    prisma.emailLog.findMany({
+      where: {
         emailType: EmailType.MEAL_CONFIRMATION,
-        recipientEmail: preview.recipientEmail,
-        subject: preview.subject,
-        html: preview.html,
-        text: preview.text,
-        guestId,
+        guestId: { in: uniqueGuestIds },
         mealDate: params.date,
-        sentById: params.sentById,
-        isResend: Boolean(priorSent),
-      });
+        status: "SENT",
+      },
+      select: { guestId: true },
+    }),
+  ]);
 
-      results.push({
-        guestId,
-        recipientEmail: preview.recipientEmail,
-        success: res.success,
-        emailLogId: res.emailLog.id,
-        error: res.success ? null : res.error,
-      });
-    } catch (err) {
-      results.push({
-        guestId,
-        recipientEmail: null,
-        success: false,
-        emailLogId: null,
-        error: err instanceof Error ? err.message : "Failed to prepare confirmation email",
-      });
-    }
+  const recordMap = new Map(records.map((r) => [r.userId, r]));
+  const priorSentSet = new Set(priorSentLogs.map((l) => l.guestId).filter(Boolean));
+
+  const CONCURRENCY = 5;
+  const results: {
+    guestId: string;
+    recipientEmail: string | null;
+    success: boolean;
+    emailLogId: string | null;
+    error: string | null;
+  }[] = [];
+
+  for (let i = 0; i < uniqueGuestIds.length; i += CONCURRENCY) {
+    const batch = uniqueGuestIds.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(async (guestId) => {
+        try {
+          const record = recordMap.get(guestId);
+          if (!record) {
+            throw new NotificationError("Meal record not found for guest and date.", 404);
+          }
+
+          const rendered = renderMealConfirmationEmail({
+            guestName: record.user.name,
+            date: record.date,
+            quantity: record.quantity,
+            unitPricePoisha: record.unitPricePoisha,
+            note: params.note,
+          });
+
+          const res = await sendAndLogEmail({
+            emailType: EmailType.MEAL_CONFIRMATION,
+            recipientEmail: record.user.email,
+            subject: rendered.subject,
+            html: rendered.html,
+            text: rendered.text,
+            guestId,
+            mealDate: params.date,
+            sentById: params.sentById ?? null,
+            isResend: priorSentSet.has(guestId),
+          });
+
+          return {
+            guestId,
+            recipientEmail: record.user.email,
+            success: res.success,
+            emailLogId: res.emailLog.id,
+            error: res.success ? null : res.error,
+          };
+        } catch (err) {
+          return {
+            guestId,
+            recipientEmail: null,
+            success: false,
+            emailLogId: null,
+            error: err instanceof Error ? err.message : "Failed to prepare confirmation email",
+          };
+        }
+      })
+    );
+    results.push(...batchResults);
   }
 
   return results;

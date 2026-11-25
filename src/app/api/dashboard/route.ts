@@ -13,12 +13,11 @@ import { AdjustmentStatus, UserRole, UserStatus } from "@prisma/client";
 
 export async function GET() {
   try {
-    const user = await requireAuth();
-    const settings = await getSettings();
+    const [user, settings] = await Promise.all([requireAuth(), getSettings()]);
     const now = getNowInTimezone(settings.timezone);
     const tomorrow = getTomorrowDateStr(settings.timezone);
 
-    await ensureMonthSchedule(now.year, now.month);
+    await ensureMonthSchedule(now.year, now.month, null, false, settings);
 
     const monthDates = getMonthDateRange(now.year, now.month);
     const startDate = monthDates[0];

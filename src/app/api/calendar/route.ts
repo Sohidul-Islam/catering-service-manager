@@ -17,8 +17,7 @@ import { AdjustmentStatus, UserRole } from "@prisma/client";
 
 export async function GET(req: NextRequest) {
   try {
-    const user = await requireAuth();
-    const settings = await getSettings();
+    const [user, settings] = await Promise.all([requireAuth(), getSettings()]);
     const now = getNowInTimezone(settings.timezone);
 
     const url = new URL(req.url);
@@ -30,7 +29,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Ensure monthly schedule exists automatically & idempotently
-    await ensureMonthSchedule(year, month);
+    await ensureMonthSchedule(year, month, null, false, settings);
 
     const dates = getMonthDateRange(year, month);
     const startDate = dates[0];
