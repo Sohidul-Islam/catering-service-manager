@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Download } from "lucide-react";
+import { CalendarDays, Download, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,12 +24,22 @@ interface ReportData {
   mealReport: {
     totalWorkingDays: number;
     totalMeals: number;
+    yearTotalMeals: number;
+    allTimeTotalMeals: number;
     totalExpectedAmountPoisha: number;
+    monthlyBreakdown: {
+      month: number;
+      totalMeals: number;
+      mealDays: number;
+      totalAmountPoisha: number;
+    }[];
     guestBreakdown: {
       userId: string;
       name: string;
       email: string;
+      mealDays: number;
       totalMeals: number;
+      allTimeMeals: number;
       totalAmountPoisha: number;
     }[];
     dateWiseHistory: {
@@ -38,6 +48,7 @@ interface ReportData {
       quantity: number;
       unitPricePoisha: number;
       totalPoisha: number;
+      source?: string;
     }[];
   };
   financialReport: {
@@ -68,6 +79,7 @@ export default function AdminReportsPage() {
   const [endDate, setEndDate] = useState("");
   const [guestId, setGuestId] = useState("");
   const [status, setStatus] = useState("");
+  const [onlyTakenDays, setOnlyTakenDays] = useState(true);
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -197,12 +209,22 @@ export default function AdminReportsPage() {
         <p className="text-sm text-slate-500 py-8 text-center">Loading reports...</p>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <Card>
               <CardContent className="p-4">
-                <p className="text-xs text-slate-500">Working Days / Total Meals</p>
+                <p className="text-xs text-slate-500">Working Days / Period Meals</p>
                 <p className="mt-1 text-xl font-bold text-slate-900">
                   {data.mealReport.totalWorkingDays} days • {data.mealReport.totalMeals} meals
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-xs text-slate-500">
+                  {guestId ? "Guest Total (Year / All-Time)" : `Total Meals (${year} / All-Time)`}
+                </p>
+                <p className="mt-1 text-xl font-bold text-blue-700">
+                  {data.mealReport.yearTotalMeals} / {data.mealReport.allTimeTotalMeals}
                 </p>
               </CardContent>
             </Card>
@@ -237,34 +259,123 @@ export default function AdminReportsPage() {
           </div>
 
           <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-blue-600" />
+                Month-by-Month Meal Overview ({year})
+                {guestId && (
+                  <Badge variant="info">
+                    {data.guests.find((g) => g.id === guestId)?.name ?? "Selected Guest"}
+                  </Badge>
+                )}
+              </CardTitle>
+              <CardDescription>
+                Click any month to view its detailed breakdown.{" "}
+                {guestId
+                  ? "Showing monthly meal counts for the selected guest."
+                  : "Showing total meals across all guests."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+                {data.mealReport.monthlyBreakdown.map((m) => {
+                  const isActive = m.month === month && !startDate && !endDate;
+                  const monthLabel = new Date(year, m.month - 1).toLocaleDateString("en-US", {
+                    month: "short",
+                  });
+                  return (
+                    <button
+                      key={m.month}
+                      type="button"
+                      onClick={() => {
+                        setStartDate("");
+                        setEndDate("");
+                        setMonth(m.month);
+                      }}
+                      className={`rounded-lg border p-2.5 text-left transition-colors cursor-pointer ${
+                        isActive
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-slate-200 bg-white hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-700">{monthLabel}</span>
+                        <span className="text-xs font-bold text-blue-700">{m.totalMeals}</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        {m.mealDays} day(s) • {formatBDT(m.totalAmountPoisha)}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
             <CardHeader className="flex-row items-center justify-between">
               <div>
                 <CardTitle>Guest-wise Meal Report</CardTitle>
-                <CardDescription>Total meals and expected expense per guest</CardDescription>
+                <CardDescription>
+                  Click a guest to inspect their day-by-day meal history and monthly totals
+                </CardDescription>
               </div>
-              <Button size="sm" variant="outline" onClick={() => exportCsv("meals")}>
-                <Download className="h-4 w-4" /> Export Meals CSV
-              </Button>
+              <div className="flex items-center gap-2">
+                {guestId && (
+                  <Button size="sm" variant="ghost" onClick={() => setGuestId("")}>
+                    Show All Guests
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={() => exportCsv("meals")}>
+                  <Download className="h-4 w-4" /> Export Meals CSV
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Guest</TableHead>
-                    <TableHead className="text-right">Total Meals</TableHead>
-                    <TableHead className="text-right">Total Meal Expense</TableHead>
+                    <TableHead className="text-right">Days Taken</TableHead>
+                    <TableHead className="text-right">Period Meals</TableHead>
+                    <TableHead className="text-right">All-Time Meals</TableHead>
+                    <TableHead className="text-right">Period Expense</TableHead>
+                    <TableHead className="text-right">Details</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {data.mealReport.guestBreakdown.map((g) => (
-                    <TableRow key={g.userId}>
+                    <TableRow
+                      key={g.userId}
+                      className={`cursor-pointer hover:bg-slate-50 ${
+                        guestId === g.userId ? "bg-blue-50/60" : ""
+                      }`}
+                      onClick={() => setGuestId(g.userId)}
+                    >
                       <TableCell>
                         <p className="font-medium text-slate-900">{g.name}</p>
                         <p className="text-xs text-slate-500">{g.email}</p>
                       </TableCell>
-                      <TableCell className="text-right font-medium">{g.totalMeals}</TableCell>
+                      <TableCell className="text-right text-slate-600">{g.mealDays}</TableCell>
+                      <TableCell className="text-right font-semibold">{g.totalMeals}</TableCell>
+                      <TableCell className="text-right font-bold text-blue-700">
+                        {g.allTimeMeals}
+                      </TableCell>
                       <TableCell className="text-right font-semibold">
                         {formatBDT(g.totalAmountPoisha)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant={guestId === g.userId ? "default" : "outline"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setGuestId(guestId === g.userId ? "" : g.userId);
+                          }}
+                        >
+                          <Eye className="h-3.5 w-3.5" />{" "}
+                          {guestId === g.userId ? "Selected" : "View Days"}
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -273,40 +384,78 @@ export default function AdminReportsPage() {
             </CardContent>
           </Card>
 
-          {guestId && data.mealReport.dateWiseHistory.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Selected Guest Date-wise Meal History</CardTitle>
-                <CardDescription>Daily confirmed quantities and unit prices</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      <TableHead className="text-right">Unit Price</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.mealReport.dateWiseHistory.map((d) => (
-                      <TableRow key={d.id}>
-                        <TableCell className="font-medium">{d.date}</TableCell>
-                        <TableCell className="text-right">{d.quantity}</TableCell>
-                        <TableCell className="text-right">
-                          {formatBDT(d.unitPricePoisha)}
-                        </TableCell>
-                        <TableCell className="text-right font-semibold">
-                          {formatBDT(d.totalPoisha)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          )}
+          {guestId && (() => {
+            const visibleHistory = onlyTakenDays
+              ? data.mealReport.dateWiseHistory.filter((d) => d.quantity > 0)
+              : data.mealReport.dateWiseHistory;
+            const selectedGuestName =
+              data.guests.find((g) => g.id === guestId)?.name ?? "Selected Guest";
+
+            return (
+              <Card>
+                <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <CardTitle>{selectedGuestName} — Day-wise Meal History</CardTitle>
+                    <CardDescription>
+                      Period total: {data.mealReport.totalMeals} meal(s) • {year} total:{" "}
+                      {data.mealReport.yearTotalMeals} meal(s) • All-time total:{" "}
+                      {data.mealReport.allTimeTotalMeals} meal(s)
+                    </CardDescription>
+                  </div>
+                  <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={onlyTakenDays}
+                      onChange={(e) => setOnlyTakenDays(e.target.checked)}
+                    />
+                    Only show days with meals (&gt; 0)
+                  </label>
+                </CardHeader>
+                <CardContent>
+                  {visibleHistory.length === 0 ? (
+                    <p className="text-sm text-slate-500 py-4 text-center">
+                      No meals recorded for this guest in the selected period.
+                    </p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead className="text-right">Qty</TableHead>
+                          <TableHead>Source</TableHead>
+                          <TableHead className="text-right">Unit Price</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {visibleHistory.map((d) => (
+                          <TableRow key={d.id}>
+                            <TableCell className="font-medium">{d.date}</TableCell>
+                            <TableCell className="text-right font-semibold">{d.quantity}</TableCell>
+                            <TableCell className="text-xs">
+                              {d.source ? (
+                                <Badge variant="muted" className="text-[10px]">
+                                  {d.source.replaceAll("_", " ")}
+                                </Badge>
+                              ) : (
+                                "—"
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {formatBDT(d.unitPricePoisha)}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold">
+                              {formatBDT(d.totalPoisha)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })()}
 
           <Card>
             <CardHeader className="flex-row items-center justify-between">

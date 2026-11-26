@@ -30,7 +30,18 @@ export async function getMonthlyReport(params: {
   const endDate = params.endDate || monthDates[monthDates.length - 1];
   const dates = startDate <= endDate ? getDateRange(startDate, endDate) : monthDates;
 
-  const [settings, holidays, records, invoices] = await Promise.all([
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+
+  const [
+    settings,
+    holidays,
+    records,
+    invoices,
+    allTimeGuestTotals,
+    yearRecords,
+    allGuests,
+  ] = await Promise.all([
     getSettings(),
     prisma.holiday.findMany({ where: { date: { gte: startDate, lte: endDate } } }),
     prisma.mealRecord.findMany({
@@ -55,7 +66,70 @@ export async function getMonthlyReport(params: {
       },
       orderBy: { user: { name: "asc" } },
     }),
+    prisma.mealRecord.groupBy({
+      by: ["userId"],
+      where: {
+        quantity: { gt: 0 },
+        user: { role: UserRole.GUEST },
+      },
+      _sum: { quantity: true },
+    }),
+    prisma.mealRecord.findMany({
+      where: {
+        date: { gte: yearStart, lte: yearEnd },
+        quantity: { gt: 0 },
+        user: { role: UserRole.GUEST },
+        ...(guestId ? { userId: guestId } : {}),
+      },
+      select: { date: true, quantity: true, unitPricePoisha: true },
+    }),
+    prisma.user.findMany({
+      where: { role: UserRole.GUEST },
+      select: { id: true, name: true, email: true, status: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
+
+  const allTimeMap = new Map<string, number>();
+  let allTimeTotalMeals = 0;
+  for (const row of allTimeGuestTotals) {
+    const qty = row._sum.quantity ?? 0;
+    allTimeMap.set(row.userId, qty);
+    allTimeTotalMeals += qty;
+  }
+  const selectedScopeAllTimeMeals = guestId
+    ? allTimeMap.get(guestId) ?? 0
+    : allTimeTotalMeals;
+
+  const monthlyMap = new Map<
+    number,
+    { month: number; totalMeals: number; mealDates: Set<string>; totalAmountPoisha: number }
+  >();
+  for (let m = 1; m <= 12; m++) {
+    monthlyMap.set(m, {
+      month: m,
+      totalMeals: 0,
+      mealDates: new Set<string>(),
+      totalAmountPoisha: 0,
+    });
+  }
+  let yearTotalMeals = 0;
+  for (const yr of yearRecords) {
+    const mNum = Number(yr.date.slice(5, 7));
+    const bucket = monthlyMap.get(mNum);
+    if (bucket) {
+      bucket.totalMeals += yr.quantity;
+      bucket.mealDates.add(yr.date);
+      bucket.totalAmountPoisha += yr.quantity * yr.unitPricePoisha;
+      yearTotalMeals += yr.quantity;
+    }
+  }
+  const monthlyBreakdown = Array.from(monthlyMap.values()).map((b) => ({
+    month: b.month,
+    totalMeals: b.totalMeals,
+    mealDays: b.mealDates.size,
+    totalAmountPoisha: b.totalAmountPoisha,
+  }));
 
   const holidayMap = new Map(holidays.map((h) => [h.date, h]));
   const totalWorkingDays = dates.filter((d) => isWorkingDay(d, settings, holidayMap)).length;
@@ -66,8 +140,29 @@ export async function getMonthlyReport(params: {
   const dailyMap = new Map<string, { date: string; meals: number; amountPoisha: number }>();
   const guestMap = new Map<
     string,
-    { userId: string; name: string; email: string; totalMeals: number; totalAmountPoisha: number }
+    {
+      userId: string;
+      name: string;
+      email: string;
+      mealDays: number;
+      totalMeals: number;
+      allTimeMeals: number;
+      totalAmountPoisha: number;
+    }
   >();
+
+  for (const gInfo of allGuests) {
+    if (guestId && gInfo.id !== guestId) continue;
+    guestMap.set(gInfo.id, {
+      userId: gInfo.id,
+      name: gInfo.name,
+      email: gInfo.email,
+      mealDays: 0,
+      totalMeals: 0,
+      allTimeMeals: allTimeMap.get(gInfo.id) ?? 0,
+      totalAmountPoisha: 0,
+    });
+  }
 
   for (const r of records) {
     totalMeals += r.quantity;
@@ -83,9 +178,12 @@ export async function getMonthlyReport(params: {
       userId: r.userId,
       name: r.user.name,
       email: r.user.email,
+      mealDays: 0,
       totalMeals: 0,
+      allTimeMeals: allTimeMap.get(r.userId) ?? 0,
       totalAmountPoisha: 0,
     };
+    if (r.quantity > 0) g.mealDays += 1;
     g.totalMeals += r.quantity;
     g.totalAmountPoisha += amt;
     guestMap.set(r.userId, g);
@@ -105,12 +203,6 @@ export async function getMonthlyReport(params: {
     else unpaidCount++;
   }
 
-  const allGuests = await prisma.user.findMany({
-    where: { role: UserRole.GUEST },
-    select: { id: true, name: true, email: true, status: true },
-    orderBy: { name: "asc" },
-  });
-
   const dateWiseHistory = guestId
     ? records.map((r) => ({
         id: r.id,
@@ -118,6 +210,7 @@ export async function getMonthlyReport(params: {
         quantity: r.quantity,
         unitPricePoisha: r.unitPricePoisha,
         totalPoisha: r.quantity * r.unitPricePoisha,
+        source: r.source,
       }))
     : [];
 
@@ -125,7 +218,10 @@ export async function getMonthlyReport(params: {
     mealReport: {
       totalWorkingDays,
       totalMeals,
+      yearTotalMeals,
+      allTimeTotalMeals: selectedScopeAllTimeMeals,
       totalExpectedAmountPoisha,
+      monthlyBreakdown,
       dailyBreakdown: Array.from(dailyMap.values()),
       guestBreakdown: Array.from(guestMap.values()).sort((a, b) =>
         a.name.localeCompare(b.name)
