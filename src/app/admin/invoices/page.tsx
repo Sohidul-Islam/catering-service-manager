@@ -109,7 +109,11 @@ export default function AdminInvoicesPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to generate invoices");
-      toast.success(`Generated/updated ${json.count} invoice(s)`);
+      if (json.count === 0) {
+        toast.info("No guests have payable meals for this month.");
+      } else {
+        toast.success(`Generated/updated ${json.count} invoice(s)`);
+      }
       setConfirmGenerateOpen(false);
       invalidateDashboardCache();
       loadInvoices();

@@ -100,6 +100,16 @@ export async function generateMonthlyInvoices(
     const records = recordsByGuest.get(guest.id) ?? [];
     const existingInvoice = invoiceByGuest.get(guest.id);
 
+    const computedTotalMeals = records.reduce((sum, rec) => sum + rec.quantity, 0);
+    const computedTotalAmountPoisha = records.reduce(
+      (sum, rec) => sum + rec.quantity * rec.unitPricePoisha,
+      0
+    );
+
+    if (!existingInvoice && (computedTotalMeals <= 0 || computedTotalAmountPoisha <= 0)) {
+      continue;
+    }
+
     const invoice =
       existingInvoice ??
       (await prisma.invoice.create({
