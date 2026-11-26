@@ -1,7 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { sendAndLogEmail } from "@/lib/email/email-service";
 import { renderMealConfirmationEmail } from "@/lib/email/templates/meal-confirmation";
-import { renderMealAdjustmentEmail } from "@/lib/email/templates/meal-adjustment";
+import {
+  renderAdjustmentDecisionEmail,
+  renderAdjustmentRequestAdminEmail,
+  renderMealAdjustmentEmail,
+} from "@/lib/email/templates/meal-adjustment";
 import { renderInvoiceEmail } from "@/lib/email/templates/invoice";
 import { renderPaymentConfirmationEmail } from "@/lib/email/templates/payment-confirmation";
 import { renderGuestInvitationEmail } from "@/lib/email/templates/guest-invitation";
@@ -412,5 +416,92 @@ export async function sendGuestInvitationEmail(params: {
     guestId: params.guestId,
     sentById: params.sentById,
     isResend: params.isResend,
+  });
+}
+
+export async function sendAdjustmentRequestAdminEmails(params: {
+  guestId: string;
+  guestName: string;
+  guestEmail: string;
+  date: string;
+  currentQuantity: number;
+  requestedQuantity: number;
+  reason?: string | null;
+  origin: string;
+}) {
+  const admins = await prisma.user.findMany({
+    where: { role: "ADMIN", status: "ACTIVE" },
+    select: { email: true },
+  });
+
+  const fallbackEmail = process.env.SMTP_FROM_EMAIL?.trim() || process.env.SMTP_USER?.trim();
+  const recipientEmails = Array.from(
+    new Set(
+      admins.length > 0
+        ? admins.map((a) => a.email)
+        : fallbackEmail
+        ? [fallbackEmail]
+        : []
+    )
+  );
+
+  if (recipientEmails.length === 0) return [];
+
+  const reviewUrl = `${params.origin.replace(/\/$/, "")}/admin/adjustment-requests`;
+  const rendered = renderAdjustmentRequestAdminEmail({
+    guestName: params.guestName,
+    guestEmail: params.guestEmail,
+    date: params.date,
+    currentQuantity: params.currentQuantity,
+    requestedQuantity: params.requestedQuantity,
+    reason: params.reason,
+    reviewUrl,
+  });
+
+  return Promise.all(
+    recipientEmails.map((recipientEmail) =>
+      sendAndLogEmail({
+        emailType: EmailType.MEAL_ADJUSTMENT,
+        recipientEmail,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        guestId: params.guestId,
+        mealDate: params.date,
+        sentById: params.guestId,
+      })
+    )
+  );
+}
+
+export async function sendAdjustmentDecisionEmail(params: {
+  guestId: string;
+  guestName: string;
+  guestEmail: string;
+  date: string;
+  currentQuantity: number;
+  requestedQuantity: number;
+  decision: "APPROVED" | "REJECTED";
+  reviewNote?: string | null;
+  sentById: string;
+}) {
+  const rendered = renderAdjustmentDecisionEmail({
+    guestName: params.guestName,
+    date: params.date,
+    currentQuantity: params.currentQuantity,
+    requestedQuantity: params.requestedQuantity,
+    decision: params.decision,
+    reviewNote: params.reviewNote,
+  });
+
+  return sendAndLogEmail({
+    emailType: EmailType.MEAL_ADJUSTMENT,
+    recipientEmail: params.guestEmail,
+    subject: rendered.subject,
+    html: rendered.html,
+    text: rendered.text,
+    guestId: params.guestId,
+    mealDate: params.date,
+    sentById: params.sentById,
   });
 }

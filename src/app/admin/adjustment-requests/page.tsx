@@ -63,7 +63,14 @@ export default function AdminAdjustmentRequestsPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to review request");
-      toast.success(`Request ${decision.toLowerCase()}`);
+      if (json.emailSent) {
+        toast.success(`Request ${decision.toLowerCase()} & email sent to guest`);
+      } else {
+        toast.success(
+          `Request ${decision.toLowerCase()}${json.emailError ? ` (email failed: ${json.emailError})` : ""}`
+        );
+      }
+      window.dispatchEvent(new Event("adjustment-requests-updated"));
       loadRequests();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Review failed");

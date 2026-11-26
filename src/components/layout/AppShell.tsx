@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -70,6 +70,34 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [pendingAdjustmentCount, setPendingAdjustmentCount] = useState(0);
+
+  const loadPendingAdjustmentCount = useCallback(async () => {
+    if (user.role !== "ADMIN") return;
+    try {
+      const res = await fetch("/api/adjustment-requests?countOnly=true");
+      if (!res.ok) return;
+      const json = await res.json();
+      if (typeof json.pendingCount === "number") {
+        setPendingAdjustmentCount(json.pendingCount);
+      }
+    } catch {
+      // Ignore transient count fetch errors
+    }
+  }, [user.role]);
+
+  useEffect(() => {
+    void loadPendingAdjustmentCount();
+  }, [loadPendingAdjustmentCount, pathname]);
+
+  useEffect(() => {
+    if (user.role !== "ADMIN") return;
+    const handleUpdate = () => {
+      void loadPendingAdjustmentCount();
+    };
+    window.addEventListener("adjustment-requests-updated", handleUpdate);
+    return () => window.removeEventListener("adjustment-requests-updated", handleUpdate);
+  }, [user.role, loadPendingAdjustmentCount]);
 
   const navItems = user.role === "ADMIN" ? ADMIN_NAV : GUEST_NAV;
 
@@ -114,6 +142,11 @@ export function AppShell({
             >
               <Icon className={cn("h-4 w-4 shrink-0", active ? "text-blue-600" : "text-slate-400")} />
               <span className="truncate">{item.label}</span>
+              {item.href === "/admin/adjustment-requests" && pendingAdjustmentCount > 0 && (
+                <span className="ml-auto inline-flex items-center justify-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                  {pendingAdjustmentCount}
+                </span>
+              )}
             </Link>
           );
         })}
