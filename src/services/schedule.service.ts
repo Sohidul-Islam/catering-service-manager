@@ -396,3 +396,91 @@ export async function syncGuestMonthSchedule(userId: string, year: number, month
 
   return counts.reduce((sum, c) => sum + c, 0);
 }
+
+/**
+ * Re-syncs non-customized DEFAULT meal records for an ACTIVE guest when their
+ * defaultMealQty, mealPreference, or mealStartDate is updated by an admin.
+ * Only impacts dates from mealStartDate onward (and removes un-finalized DEFAULT
+ * records prior to mealStartDate or when mealStartDate is cleared).
+ */
+export async function resyncGuestDefaultMeals(userId: string, year: number, month: number) {
+  const [guest, settings] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        status: true,
+        role: true,
+        mealPreference: true,
+        defaultMealQty: true,
+        mealStartDate: true,
+      },
+    }),
+    getSettings(),
+  ]);
+
+  if (!guest || guest.role !== UserRole.GUEST || guest.status !== UserStatus.ACTIVE) {
+    return 0;
+  }
+
+  // 1. Remove un-finalized, non-customized DEFAULT records before mealStartDate
+  // (or all of them if mealStartDate was cleared to null).
+  await prisma.mealRecord.deleteMany({
+    where: {
+      userId: guest.id,
+      source: MealSource.DEFAULT,
+      isCustomized: false,
+      isFinalized: false,
+      ...(guest.mealStartDate ? { date: { lt: guest.mealStartDate } } : {}),
+    },
+  });
+
+  if (!guest.mealStartDate) {
+    return 0;
+  }
+
+  // 2. Update existing un-finalized, non-customized DEFAULT working-day records
+  // from mealStartDate onward to the new default quantity.
+  const nextDefaultQty =
+    guest.mealPreference === MealPreference.REGULAR ? Math.max(0, guest.defaultMealQty) : 0;
+
+  const [existingDefaults, holidays] = await Promise.all([
+    prisma.mealRecord.findMany({
+      where: {
+        userId: guest.id,
+        source: MealSource.DEFAULT,
+        isCustomized: false,
+        isFinalized: false,
+        date: { gte: guest.mealStartDate },
+      },
+      select: { id: true, date: true, quantity: true },
+    }),
+    prisma.holiday.findMany({
+      where: { date: { gte: guest.mealStartDate } },
+    }),
+  ]);
+
+  const holidayMap = new Map(holidays.map((h) => [h.date, h]));
+  const idsToUpdate = existingDefaults
+    .filter((rec) => {
+      const expectedQty = isWorkingDay(rec.date, settings, holidayMap) ? nextDefaultQty : 0;
+      return rec.quantity !== expectedQty;
+    })
+    .map((rec) => rec.id);
+
+  // Separate working-day IDs vs non-working-day IDs (non-working stays 0)
+  const workingIds = idsToUpdate.filter((id) => {
+    const rec = existingDefaults.find((r) => r.id === id);
+    return rec ? isWorkingDay(rec.date, settings, holidayMap) : false;
+  });
+
+  if (workingIds.length > 0) {
+    await prisma.mealRecord.updateMany({
+      where: { id: { in: workingIds } },
+      data: { quantity: nextDefaultQty },
+    });
+  }
+
+  // 3. Create any missing records from mealStartDate onward in current & future months.
+  return syncGuestMonthSchedule(guest.id, year, month);
+}

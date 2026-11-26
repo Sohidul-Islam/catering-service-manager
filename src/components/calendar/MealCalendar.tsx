@@ -184,6 +184,27 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
   const cacheKey = `${mode}:${year}-${month}`;
   const activeKeyRef = useRef(cacheKey);
 
+  const prefetchMonth = useCallback(
+    (targetYear: number, targetMonth: number) => {
+      const targetKey = `${mode}:${targetYear}-${targetMonth}`;
+      const existing = getCachedCalendar<CalendarResponse>(targetKey);
+      if (existing?.isFresh) return;
+
+      void fetchCalendarDeduped(targetKey, async () => {
+        const res = await fetch(`/api/calendar?year=${targetYear}&month=${targetMonth}`);
+        if (!res.ok) throw new Error("Prefetch failed");
+        return (await res.json()) as CalendarResponse;
+      })
+        .then((prefetched) => {
+          setCachedCalendar(targetKey, prefetched);
+        })
+        .catch(() => {
+          // Ignore silent prefetch errors
+        });
+    },
+    [mode]
+  );
+
   const fetchCalendar = useCallback(
     async (silent = false, force = false) => {
       const requestKey = `${mode}:${year}-${month}`;
@@ -197,6 +218,10 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
         });
         setLoading(false);
         if (cached.isFresh) {
+          const prevM = month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 };
+          const nextM = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
+          prefetchMonth(nextM.y, nextM.m);
+          prefetchMonth(prevM.y, prevM.m);
           return;
         }
       } else if (!silent) {
@@ -224,6 +249,11 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
           if (!prev) return null;
           return json.days.find((d) => d.date === prev.date) ?? prev;
         });
+
+        const prevM = month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 };
+        const nextM = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
+        prefetchMonth(nextM.y, nextM.m);
+        prefetchMonth(prevM.y, prevM.m);
       } catch (err) {
         if (!cached && activeKeyRef.current === requestKey) {
           toast.error(err instanceof Error ? err.message : "Failed to load calendar");
@@ -234,7 +264,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
         }
       }
     },
-    [mode, year, month]
+    [mode, year, month, prefetchMonth]
   );
 
   useEffect(() => {
@@ -387,9 +417,10 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
       };
     };
 
-    setData((curr) =>
-      curr ? { ...curr, days: curr.days.map(applyOptimistic) } : curr
-    );
+    const nextData = prevData
+      ? { ...prevData, days: prevData.days.map(applyOptimistic) }
+      : prevData;
+    setData(nextData);
     setSelectedDay((curr) => (curr ? applyOptimistic(curr) : curr));
 
     const nextSeq = (latestSeqRef.current.get(key) ?? 0) + 1;
@@ -442,11 +473,11 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
 
           if (selectedScope === "FOLLOWING_DATES") {
             invalidateCalendarCache();
-          } else {
-            invalidateCalendarCache(cacheKey);
+          }
+          if (nextData) {
+            setCachedCalendar(cacheKey, nextData);
           }
           invalidateDashboardCache();
-          await fetchCalendar(true, true);
         }
       } catch (err) {
         if (latestSeqRef.current.get(key) === nextSeq) {

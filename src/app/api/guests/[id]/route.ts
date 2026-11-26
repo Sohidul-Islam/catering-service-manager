@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/services/auth.service";
 import { logActivity } from "@/services/activity.service";
-import { syncGuestMonthSchedule, getSettings } from "@/services/schedule.service";
+import { resyncGuestDefaultMeals, getSettings } from "@/services/schedule.service";
 import { getNowInTimezone } from "@/lib/timezone";
 import { handleApiError } from "@/lib/api-utils";
 import { MealPreference, UserStatus } from "@prisma/client";
@@ -109,11 +109,14 @@ export async function PATCH(
 
     if (
       updated.status === UserStatus.ACTIVE &&
-      (existing.status !== UserStatus.ACTIVE || existing.mealStartDate !== updated.mealStartDate)
+      (existing.status !== UserStatus.ACTIVE ||
+        existing.mealStartDate !== updated.mealStartDate ||
+        existing.mealPreference !== updated.mealPreference ||
+        existing.defaultMealQty !== updated.defaultMealQty)
     ) {
       const settings = await getSettings();
       const now = getNowInTimezone(settings.timezone);
-      await syncGuestMonthSchedule(updated.id, now.year, now.month);
+      await resyncGuestDefaultMeals(updated.id, now.year, now.month);
     }
 
     return NextResponse.json({ guest: updated });

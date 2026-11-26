@@ -1,4 +1,4 @@
-export const CALENDAR_FRESH_TTL_MS = 60_000;
+export const CALENDAR_FRESH_TTL_MS = 120_000;
 
 interface CacheEntry<T> {
   data: T;

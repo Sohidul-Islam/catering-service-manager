@@ -793,12 +793,15 @@ export default function AdminGuestsPage() {
                 <Label>Preference</Label>
                 <Select
                   value={editGuest.mealPreference}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const nextPref = e.target.value as "REGULAR" | "OCCASIONAL";
                     setEditGuest({
                       ...editGuest,
-                      mealPreference: e.target.value as "REGULAR" | "OCCASIONAL",
-                    })
-                  }
+                      mealPreference: nextPref,
+                      defaultMealQty:
+                        nextPref === "OCCASIONAL" ? 0 : editGuest.defaultMealQty || 1,
+                    });
+                  }}
                   className="mt-1"
                 >
                   <option value="REGULAR">Regular</option>
@@ -810,7 +813,10 @@ export default function AdminGuestsPage() {
                 <Input
                   type="number"
                   min={0}
-                  value={editGuest.defaultMealQty}
+                  disabled={editGuest.mealPreference === "OCCASIONAL"}
+                  value={
+                    editGuest.mealPreference === "OCCASIONAL" ? 0 : editGuest.defaultMealQty
+                  }
                   onChange={(e) =>
                     setEditGuest({ ...editGuest, defaultMealQty: Number(e.target.value) })
                   }

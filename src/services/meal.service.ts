@@ -189,11 +189,21 @@ export async function updateMealQuantity(input: UpdateMealInput) {
         : [];
 
       if (futureRecords.length > 0 || missingPreStartDates.length > 0) {
-        const futureHolidays = await tx.holiday.findMany({
-          where: { date: { gt: date } },
-        });
+        const [futureHolidays, monthPrices] = await Promise.all([
+          tx.holiday.findMany({
+            where: { date: { gt: date } },
+          }),
+          missingPreStartDates.length > 0
+            ? tx.mealPrice.findMany({
+                where: {
+                  date: { gte: monthDates[0], lte: monthDates[monthDates.length - 1] },
+                },
+              })
+            : Promise.resolve([]),
+        ]);
         const futureHolidayMap = new Map(futureHolidays.map((h) => [h.date, h]));
 
+        const idsToUpdate: string[] = [];
         for (const fRec of futureRecords) {
           if (!isWorkingDay(fRec.date, settings, futureHolidayMap)) {
             continue;
@@ -210,8 +220,12 @@ export async function updateMealQuantity(input: UpdateMealInput) {
           ) {
             continue;
           }
-          await tx.mealRecord.update({
-            where: { id: fRec.id },
+          idsToUpdate.push(fRec.id);
+        }
+
+        if (idsToUpdate.length > 0) {
+          await tx.mealRecord.updateMany({
+            where: { id: { in: idsToUpdate } },
             data: {
               quantity,
               source: MealSource.FOLLOWING_RULE,
@@ -219,34 +233,27 @@ export async function updateMealQuantity(input: UpdateMealInput) {
               isCustomized: true,
             },
           });
-          updatedFollowingCount++;
+          updatedFollowingCount += idsToUpdate.length;
         }
 
         if (missingPreStartDates.length > 0) {
-          const monthPrices = await tx.mealPrice.findMany({
-            where: {
-              date: { gte: monthDates[0], lte: monthDates[monthDates.length - 1] },
-            },
-          });
           const monthPriceMap = new Map(monthPrices.map((p) => [p.date, p.pricePoisha]));
+          const recordsToCreate = missingPreStartDates
+            .filter((d) => isWorkingDay(d, settings, futureHolidayMap))
+            .map((d) => ({
+              userId: targetUserId,
+              date: d,
+              quantity,
+              unitPricePoisha: resolveMealPrice(d, settings, monthPriceMap),
+              source: MealSource.FOLLOWING_RULE,
+              overrideScope: MealOverrideScope.FOLLOWING_DATES,
+              isCustomized: true,
+              isFinalized: false,
+            }));
 
-          for (const d of missingPreStartDates) {
-            if (!isWorkingDay(d, settings, futureHolidayMap)) {
-              continue;
-            }
-            await tx.mealRecord.create({
-              data: {
-                userId: targetUserId,
-                date: d,
-                quantity,
-                unitPricePoisha: resolveMealPrice(d, settings, monthPriceMap),
-                source: MealSource.FOLLOWING_RULE,
-                overrideScope: MealOverrideScope.FOLLOWING_DATES,
-                isCustomized: true,
-                isFinalized: false,
-              },
-            });
-            updatedFollowingCount++;
+          if (recordsToCreate.length > 0) {
+            await tx.mealRecord.createMany({ data: recordsToCreate });
+            updatedFollowingCount += recordsToCreate.length;
           }
         }
       }
