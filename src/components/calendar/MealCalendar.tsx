@@ -350,8 +350,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
         (isTargetDate ||
           (isFollowingTarget &&
             nextQty > 0 &&
-            Boolean(guestInfo.mealStartDate) &&
-            day.date < guestInfo.mealStartDate!))
+            (!guestInfo.mealStartDate || day.date < guestInfo.mealStartDate)))
       ) {
         updatedRecords = [
           ...day.records,

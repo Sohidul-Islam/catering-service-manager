@@ -108,6 +108,11 @@ export function resolveEffectiveMealRule(
     };
   }
 
+  // If guest has not set a Meal Start Date yet, do not auto-schedule default meals
+  if (!guest.mealStartDate) {
+    return null;
+  }
+
   return {
     quantity:
       guest.mealPreference === MealPreference.REGULAR ? Math.max(0, guest.defaultMealQty) : 0,

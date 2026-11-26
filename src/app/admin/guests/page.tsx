@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Copy, History, Mail, Plus, RefreshCw, UserCheck } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { AlertCircle, CheckCircle2, Copy, History, Mail, Plus, RefreshCw, UserCheck, Users } from "lucide-react";
+import { parseBulkGuestInput, type InvalidBulkGuest } from "@/lib/guest-bulk-parser";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,19 +34,34 @@ interface GuestRow {
   outstandingPoisha: number;
 }
 
-function getTodayDateStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
-}
-
 export default function AdminGuestsPage() {
   const [guests, setGuests] = useState<GuestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkRawInput, setBulkRawInput] = useState("");
+  const [bulkMealPreference, setBulkMealPreference] = useState<"REGULAR" | "OCCASIONAL">("REGULAR");
+  const [bulkDefaultMealQty, setBulkDefaultMealQty] = useState(1);
+  const [bulkMealStartDate, setBulkMealStartDate] = useState("");
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{
+    created: {
+      id: string;
+      name: string;
+      email: string;
+      invitePath: string;
+      emailSent: boolean;
+      emailError?: string;
+    }[];
+    failed: InvalidBulkGuest[];
+  } | null>(null);
   const [editGuest, setEditGuest] = useState<GuestRow | null>(null);
   const [createdInviteLink, setCreatedInviteLink] = useState<string | null>(null);
+  const [createdInviteEmailStatus, setCreatedInviteEmailStatus] = useState<{
+    email: string;
+    sent: boolean;
+    error?: string;
+  } | null>(null);
   const [historyGuest, setHistoryGuest] = useState<{
     name: string;
     email: string;
@@ -96,7 +112,7 @@ export default function AdminGuestsPage() {
   const [phone, setPhone] = useState("");
   const [mealPreference, setMealPreference] = useState<"REGULAR" | "OCCASIONAL">("REGULAR");
   const [defaultMealQty, setDefaultMealQty] = useState(1);
-  const [mealStartDate, setMealStartDate] = useState(getTodayDateStr);
+  const [mealStartDate, setMealStartDate] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   async function loadGuests() {
@@ -135,18 +151,77 @@ export default function AdminGuestsPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to invite guest");
+      const invitedEmail = email;
       const fullLink = `${window.location.origin}${json.invitePath}`;
       setCreatedInviteLink(fullLink);
-      toast.success(`Invitation created for ${name}`);
+      setCreatedInviteEmailStatus({
+        email: invitedEmail,
+        sent: Boolean(json.emailSent),
+        error: json.emailError,
+      });
+      if (json.emailSent) {
+        toast.success(`Invitation created and sent to ${invitedEmail}`);
+      } else {
+        toast.warning(
+          `Invitation created for ${name}, but email failed: ${json.emailError || "SMTP error"}`
+        );
+      }
       setName("");
       setEmail("");
       setPhone("");
+      setMealStartDate("");
       invalidateCalendarCache();
       loadGuests();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to invite guest");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  const bulkPreview = useMemo(() => parseBulkGuestInput(bulkRawInput), [bulkRawInput]);
+
+  async function handleBulkSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (bulkPreview.valid.length === 0 && bulkPreview.invalid.length === 0) {
+      toast.error("Please enter at least one guest email.");
+      return;
+    }
+    setBulkSubmitting(true);
+    try {
+      const res = await fetch("/api/guests/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rawInput: bulkRawInput,
+          mealPreference: bulkMealPreference,
+          defaultMealQty: bulkMealPreference === "OCCASIONAL" ? 0 : bulkDefaultMealQty,
+          mealStartDate: bulkMealStartDate || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Bulk invite failed");
+
+      setBulkResult({
+        created: json.created || [],
+        failed: json.failed || [],
+      });
+
+      const createdCount = json.created?.length ?? 0;
+      const failedCount = json.failed?.length ?? 0;
+      if (createdCount > 0) {
+        toast.success(
+          `Added ${createdCount} guest(s)${failedCount > 0 ? ` (${failedCount} skipped)` : ""}`
+        );
+        invalidateCalendarCache();
+        loadGuests();
+      } else {
+        toast.error("No guests were added. Check the invalid/duplicate entries.");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Bulk invite failed");
+    } finally {
+      setBulkSubmitting(false);
     }
   }
 
@@ -187,7 +262,13 @@ export default function AdminGuestsPage() {
       if (!res.ok) throw new Error(json.error || "Failed to regenerate invite");
       const link = `${window.location.origin}${json.invitePath}`;
       await navigator.clipboard?.writeText(link);
-      toast.success("New invitation link copied to clipboard!");
+      if (json.emailSent) {
+        toast.success("New invitation link emailed & copied to clipboard!");
+      } else {
+        toast.warning(
+          `New invitation link copied, but email failed: ${json.emailError || "SMTP error"}`
+        );
+      }
       loadGuests();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to reinvite");
@@ -222,14 +303,28 @@ export default function AdminGuestsPage() {
             Invite guests, configure regular/occasional meal defaults, and manage access.
           </p>
         </div>
-        <Button
-          onClick={() => {
-            setCreatedInviteLink(null);
-            setInviteOpen(true);
-          }}
-        >
-          <Plus className="h-4 w-4" /> Invite Guest
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setBulkResult(null);
+              setBulkRawInput("");
+              setBulkMealStartDate("");
+              setBulkOpen(true);
+            }}
+          >
+            <Users className="h-4 w-4" /> Bulk Add Guests
+          </Button>
+          <Button
+            onClick={() => {
+              setCreatedInviteLink(null);
+              setCreatedInviteEmailStatus(null);
+              setInviteOpen(true);
+            }}
+          >
+            <Plus className="h-4 w-4" /> Invite Guest
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -282,7 +377,7 @@ export default function AdminGuestsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs text-slate-600">
-                      {g.mealStartDate || "From start"}
+                      {g.mealStartDate || "Not set (Calendar)"}
                     </TableCell>
                     <TableCell className="text-right font-medium">{g.defaultMealQty}</TableCell>
                     <TableCell className="text-right font-medium">
@@ -340,8 +435,17 @@ export default function AdminGuestsPage() {
           <div className="space-y-4">
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
               <p className="font-semibold flex items-center gap-1.5">
-                <Mail className="h-4 w-4" /> Invitation Link Ready
+                <Mail className="h-4 w-4" />{" "}
+                {createdInviteEmailStatus?.sent
+                  ? `Invitation Emailed to ${createdInviteEmailStatus.email}`
+                  : "Invitation Link Ready"}
               </p>
+              {createdInviteEmailStatus && !createdInviteEmailStatus.sent && (
+                <p className="mt-1 text-xs text-amber-700">
+                  Email could not be sent ({createdInviteEmailStatus.error || "SMTP error"}). You
+                  can still copy and share the link below.
+                </p>
+              )}
               <p className="mt-1 text-xs break-all font-mono bg-white p-2 rounded border border-emerald-200">
                 {createdInviteLink}
               </p>
@@ -412,20 +516,29 @@ export default function AdminGuestsPage() {
               </div>
             </div>
             <div>
-              <Label htmlFor="g-start">Meal Start Date</Label>
+              <Label htmlFor="g-start">Meal Start Date (optional)</Label>
               <Input
                 id="g-start"
                 type="date"
-                required
                 value={mealStartDate}
                 onChange={(e) => setMealStartDate(e.target.value)}
                 className="mt-1"
               />
               <p className="mt-1.5 text-xs text-slate-500">
-                Starting from <span className="font-medium text-slate-700">{mealStartDate}</span>:{" "}
-                {mealPreference === "REGULAR" ? defaultMealQty : 0} meal(s) will be auto-scheduled
-                on applicable working days. Earlier dates are not auto-scheduled, though admins can
-                still add or adjust historical records in the Calendar.
+                {mealStartDate ? (
+                  <>
+                    Starting from <span className="font-medium text-slate-700">{mealStartDate}</span>
+                    : {mealPreference === "REGULAR" ? defaultMealQty : 0} meal(s) will be
+                    auto-scheduled on applicable working days. Earlier dates are not
+                    auto-scheduled, though admins can still add or adjust records in the Calendar.
+                  </>
+                ) : (
+                  <>
+                    Leave empty if the guest hasn&rsquo;t decided when they will start taking meals.
+                    No meals will be auto-scheduled; admins can manage meals for this guest from the
+                    Calendar.
+                  </>
+                )}
               </p>
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -434,6 +547,202 @@ export default function AdminGuestsPage() {
               </Button>
               <Button type="submit" disabled={submitting}>
                 {submitting ? "Creating..." : "Create Invitation"}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Dialog>
+
+      {/* Bulk Add Modal */}
+      <Dialog
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        title="Bulk Add Guests"
+        description="Add multiple guests using comma-separated emails or one guest per line with an optional name."
+        maxWidthClass="max-w-2xl"
+      >
+        {bulkResult ? (
+          <div className="space-y-4">
+            {bulkResult.created.length > 0 && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 space-y-2">
+                <p className="text-sm font-semibold text-emerald-900 flex items-center gap-1.5">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Added {bulkResult.created.length} Guest(s)
+                </p>
+                <div className="max-h-44 overflow-y-auto space-y-1.5">
+                  {bulkResult.created.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded bg-white px-2.5 py-1.5 text-xs border border-emerald-200"
+                    >
+                      <div>
+                        <span className="font-semibold text-slate-900">{item.name}</span>{" "}
+                        <span className="text-slate-500">({item.email})</span>
+                      </div>
+                      <span
+                        className={
+                          item.emailSent ? "text-emerald-700 font-medium" : "text-amber-700"
+                        }
+                      >
+                        {item.emailSent
+                          ? "Invite emailed"
+                          : `Email failed: ${item.emailError || "SMTP error"}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {bulkResult.failed.length > 0 && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 space-y-2">
+                <p className="text-sm font-semibold text-red-900 flex items-center gap-1.5">
+                  <AlertCircle className="h-4 w-4" />
+                  Could Not Process ({bulkResult.failed.length})
+                </p>
+                <div className="max-h-40 overflow-y-auto space-y-1">
+                  {bulkResult.failed.map((item, idx) => (
+                    <div
+                      key={`${item.email}-${idx}`}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded bg-white px-2.5 py-1.5 text-xs border border-red-200"
+                    >
+                      <span className="font-mono text-slate-800">{item.raw}</span>
+                      <span className="text-red-700 font-medium">{item.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setBulkResult(null);
+                  setBulkRawInput("");
+                }}
+              >
+                Add More
+              </Button>
+              <Button onClick={() => setBulkOpen(false)}>Done</Button>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleBulkSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="bulk-guests-input">Guests (Email, Optional Name)</Label>
+              <textarea
+                id="bulk-guests-input"
+                rows={5}
+                required
+                value={bulkRawInput}
+                onChange={(e) => setBulkRawInput(e.target.value)}
+                placeholder={
+                  "john@example.com, John Doe\nsarah@example.com, Sarah Ahmed\nmike@example.com\n\nOr comma-separated emails:\nalex@example.com, priya.patel@example.com"
+                }
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-xs placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 font-mono"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                If no name is provided, a name is automatically generated from the email address
+                (e.g. <span className="font-mono">john.doe@example.com</span> →{" "}
+                <span className="font-medium text-slate-700">John Doe</span>).
+              </p>
+            </div>
+
+            {bulkRawInput.trim().length > 0 && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700">
+                    Preview: {bulkPreview.valid.length} valid
+                    {bulkPreview.invalid.length > 0 && (
+                      <span className="text-red-600"> • {bulkPreview.invalid.length} invalid/duplicate</span>
+                    )}
+                  </span>
+                </div>
+                {bulkPreview.valid.length > 0 && (
+                  <div className="max-h-28 overflow-y-auto space-y-1">
+                    {bulkPreview.valid.map((g) => (
+                      <div key={g.email} className="flex items-center justify-between text-slate-700">
+                        <span>
+                          <span className="font-medium text-slate-900">{g.name}</span>{" "}
+                          <span className="text-slate-500">({g.email})</span>
+                        </span>
+                        {g.isNameGenerated && (
+                          <Badge variant="muted" className="text-[10px]">
+                            Auto-named
+                          </Badge>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {bulkPreview.invalid.length > 0 && (
+                  <div className="max-h-24 overflow-y-auto space-y-1 border-t border-slate-200 pt-1.5">
+                    {bulkPreview.invalid.map((inv, idx) => (
+                      <div key={`${inv.raw}-${idx}`} className="flex justify-between text-red-600">
+                        <span className="font-mono truncate max-w-[60%]">{inv.raw}</span>
+                        <span>{inv.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="bulk-pref">Meal Preference</Label>
+                <Select
+                  id="bulk-pref"
+                  value={bulkMealPreference}
+                  onChange={(e) =>
+                    setBulkMealPreference(e.target.value as "REGULAR" | "OCCASIONAL")
+                  }
+                  className="mt-1"
+                >
+                  <option value="REGULAR">Regular</option>
+                  <option value="OCCASIONAL">Occasional</option>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="bulk-qty">Default Meal Qty</Label>
+                <Input
+                  id="bulk-qty"
+                  type="number"
+                  min={0}
+                  disabled={bulkMealPreference === "OCCASIONAL"}
+                  value={bulkMealPreference === "OCCASIONAL" ? 0 : bulkDefaultMealQty}
+                  onChange={(e) => setBulkDefaultMealQty(Number(e.target.value))}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="bulk-start">Meal Start Date (optional)</Label>
+              <Input
+                id="bulk-start"
+                type="date"
+                value={bulkMealStartDate}
+                onChange={(e) => setBulkMealStartDate(e.target.value)}
+                className="mt-1"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Leave empty if guests haven&rsquo;t decided when they will start taking meals.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setBulkOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={bulkSubmitting || bulkPreview.valid.length === 0}
+              >
+                {bulkSubmitting
+                  ? "Adding & Inviting..."
+                  : `Add & Invite (${bulkPreview.valid.length})`}
               </Button>
             </div>
           </form>
@@ -552,7 +861,7 @@ export default function AdminGuestsPage() {
               <div>
                 <p className="text-slate-500">Meal Start Date</p>
                 <p className="font-semibold text-slate-900">
-                  {historyGuest.mealStartDate || "From start"}
+                  {historyGuest.mealStartDate || "Not set (Calendar)"}
                 </p>
               </div>
               <div>

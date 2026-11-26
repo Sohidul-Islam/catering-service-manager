@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/services/auth.service";
-import { logActivity } from "@/services/activity.service";
-import { getSettings } from "@/services/schedule.service";
-import { getNowInTimezone } from "@/lib/timezone";
+import { createAndInviteGuest, GuestAlreadyExistsError } from "@/services/guest.service";
 import { handleApiError } from "@/lib/api-utils";
-import { MealPreference, UserRole, UserStatus } from "@prisma/client";
+import { MealPreference, UserRole } from "@prisma/client";
 
 const createGuestSchema = z.object({
   name: z.string().min(1, "Name is required").max(120),
@@ -18,7 +15,9 @@ const createGuestSchema = z.object({
   mealStartDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid meal start date (YYYY-MM-DD)")
-    .optional(),
+    .nullable()
+    .optional()
+    .or(z.literal("")),
 });
 
 export async function GET() {
@@ -78,69 +77,26 @@ export async function POST(req: NextRequest) {
     const admin = await requireAdmin();
     const body = await req.json();
     const data = createGuestSchema.parse(body);
-    const email = data.email.toLowerCase().trim();
 
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      return NextResponse.json({ error: "A user with this email already exists." }, { status: 409 });
-    }
+    const origin =
+      req.nextUrl.origin || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
 
-    const settings = await getSettings();
-    const defaultStart = getNowInTimezone(settings.timezone).dateStr;
-    const mealStartDate = data.mealStartDate || defaultStart;
-
-    const token = crypto.randomBytes(24).toString("hex");
-    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14); // 14 days
-
-    const result = await prisma.$transaction(async (tx) => {
-      const guest = await tx.user.create({
-        data: {
-          name: data.name.trim(),
-          email,
-          phone: data.phone?.trim() || null,
-          role: UserRole.GUEST,
-          status: UserStatus.INVITED,
-          mealPreference: data.mealPreference,
-          defaultMealQty:
-            data.mealPreference === MealPreference.OCCASIONAL ? 0 : data.defaultMealQty,
-          mealStartDate,
-        },
-      });
-
-      const invitation = await tx.invitation.create({
-        data: {
-          userId: guest.id,
-          token,
-          expiresAt,
-        },
-      });
-
-      await logActivity({
-        tx,
-        actorId: admin.id,
-        targetUserId: guest.id,
-        action: "INVITE_GUEST",
-        entityType: "User",
-        entityId: guest.id,
-        newValue: JSON.stringify({
-          email: guest.email,
-          mealPreference: guest.mealPreference,
-          defaultMealQty: guest.defaultMealQty,
-        }),
-      });
-
-      return { guest, invitation };
+    const result = await createAndInviteGuest({
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      mealPreference: data.mealPreference,
+      defaultMealQty: data.defaultMealQty,
+      mealStartDate: data.mealStartDate || null,
+      actorId: admin.id,
+      origin,
     });
 
-    return NextResponse.json(
-      {
-        guest: result.guest,
-        inviteToken: result.invitation.token,
-        invitePath: `/invite/accept?token=${result.invitation.token}`,
-      },
-      { status: 201 }
-    );
+    return NextResponse.json(result, { status: 201 });
   } catch (error) {
+    if (error instanceof GuestAlreadyExistsError) {
+      return NextResponse.json({ error: "A user with this email already exists." }, { status: 409 });
+    }
     return handleApiError(error);
   }
 }

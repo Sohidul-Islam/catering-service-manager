@@ -55,6 +55,7 @@ enum PaymentType {
 }
 
 enum EmailType {
+  GUEST_INVITATION
   MEAL_CONFIRMATION
   MEAL_ADJUSTMENT
   INVOICE

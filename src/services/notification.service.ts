@@ -4,6 +4,8 @@ import { renderMealConfirmationEmail } from "@/lib/email/templates/meal-confirma
 import { renderMealAdjustmentEmail } from "@/lib/email/templates/meal-adjustment";
 import { renderInvoiceEmail } from "@/lib/email/templates/invoice";
 import { renderPaymentConfirmationEmail } from "@/lib/email/templates/payment-confirmation";
+import { renderGuestInvitationEmail } from "@/lib/email/templates/guest-invitation";
+import { getSettings } from "./schedule.service";
 import { buildPublicInvoiceUrl, generatePublicInvoiceToken, getActivePublicToken } from "./public-invoice.service";
 import { EmailType } from "@prisma/client";
 
@@ -382,5 +384,33 @@ export async function sendPaymentConfirmationEmail(params: {
     paymentId: payment.id,
     sentById: params.sentById,
     isResend: Boolean(priorSent),
+  });
+}
+
+export async function sendGuestInvitationEmail(params: {
+  guestId: string;
+  guestName: string;
+  guestEmail: string;
+  inviteUrl: string;
+  sentById: string;
+  isResend?: boolean;
+}) {
+  const settings = await getSettings();
+  const rendered = renderGuestInvitationEmail({
+    guestName: params.guestName,
+    organizationName: settings.organizationName || "Office Meal Management",
+    inviteUrl: params.inviteUrl,
+    expiresInDays: 14,
+  });
+
+  return sendAndLogEmail({
+    emailType: EmailType.GUEST_INVITATION,
+    recipientEmail: params.guestEmail,
+    subject: rendered.subject,
+    html: rendered.html,
+    text: rendered.text,
+    guestId: params.guestId,
+    sentById: params.sentById,
+    isResend: params.isResend,
   });
 }

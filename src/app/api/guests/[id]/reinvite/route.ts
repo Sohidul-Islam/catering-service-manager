@@ -4,9 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/services/auth.service";
 import { handleApiError } from "@/lib/api-utils";
 import { logActivity } from "@/services/activity.service";
+import { sendGuestInvitationEmail } from "@/services/notification.service";
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -35,9 +36,28 @@ export async function POST(
       entityId: invitation.id,
     });
 
+    const invitePath = `/invite/accept?token=${invitation.token}`;
+    const origin = (
+      req.nextUrl.origin ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "http://localhost:3001"
+    ).replace(/\/$/, "");
+    const inviteUrl = `${origin}${invitePath}`;
+
+    const emailResult = await sendGuestInvitationEmail({
+      guestId: guest.id,
+      guestName: guest.name,
+      guestEmail: guest.email,
+      inviteUrl,
+      sentById: admin.id,
+      isResend: true,
+    });
+
     return NextResponse.json({
       inviteToken: invitation.token,
-      invitePath: `/invite/accept?token=${invitation.token}`,
+      invitePath,
+      emailSent: emailResult.success,
+      emailError: emailResult.success ? undefined : emailResult.error,
     });
   } catch (error) {
     return handleApiError(error);

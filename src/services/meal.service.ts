@@ -177,12 +177,14 @@ export async function updateMealQuantity(input: UpdateMealInput) {
       const monthDates = getMonthDateRange(year, month);
       const shouldBackfillPreStart =
         actorRole === UserRole.ADMIN &&
-        Boolean(targetUser.mealStartDate) &&
-        date < targetUser.mealStartDate! &&
+        (!targetUser.mealStartDate || date < targetUser.mealStartDate) &&
         quantity > 0;
       const missingPreStartDates = shouldBackfillPreStart
         ? monthDates.filter(
-            (d) => d > date && d < targetUser.mealStartDate! && !existingFutureDates.has(d)
+            (d) =>
+              d > date &&
+              (!targetUser.mealStartDate || d < targetUser.mealStartDate) &&
+              !existingFutureDates.has(d)
           )
         : [];
 

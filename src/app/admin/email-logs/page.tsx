@@ -69,6 +69,7 @@ export default function AdminEmailLogsPage() {
             onChange={(e) => setTypeFilter(e.target.value)}
           >
             <option value="">All Types</option>
+            <option value="GUEST_INVITATION">Guest Invitation</option>
             <option value="MEAL_CONFIRMATION">Meal Confirmation</option>
             <option value="MEAL_ADJUSTMENT">Meal Adjustment</option>
             <option value="INVOICE">Invoice</option>
