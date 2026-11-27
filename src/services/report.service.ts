@@ -8,7 +8,12 @@ import {
   parseDateStr,
 } from "@/lib/timezone";
 import { InvoiceStatus, UserRole, UserStatus } from "@prisma/client";
-import { ensureMonthSchedule, getSettings, isWorkingDay } from "./schedule.service";
+import {
+  ensureMonthSchedule,
+  getSettings,
+  isWorkingDay,
+  reconcileClosedDayRecordsInMemory,
+} from "./schedule.service";
 import type {
   MealSummaryDailyItem,
   MealSummaryGuestItem,
@@ -132,6 +137,7 @@ export async function getMonthlyReport(params: {
   }));
 
   const holidayMap = new Map(holidays.map((h) => [h.date, h]));
+  await reconcileClosedDayRecordsInMemory(records, settings, holidayMap);
   const totalWorkingDays = dates.filter((d) => isWorkingDay(d, settings, holidayMap)).length;
 
   let totalMeals = 0;
@@ -306,7 +312,7 @@ export async function getMealSummary(params: {
     }
   }
 
-  const [records, activeGuests] = await Promise.all([
+  const [records, activeGuests, holidays] = await Promise.all([
     prisma.mealRecord.findMany({
       where: {
         date: { gte: startDate, lte: endDate },
@@ -325,7 +331,13 @@ export async function getMealSummary(params: {
       select: { id: true, name: true, email: true, status: true },
       orderBy: { name: "asc" },
     }),
+    prisma.holiday.findMany({
+      where: { date: { gte: startDate, lte: endDate } },
+    }),
   ]);
+
+  const holidayMap = new Map(holidays.map((h) => [h.date, h]));
+  await reconcileClosedDayRecordsInMemory(records, settings, holidayMap);
 
   const guestMap = new Map<string, MealSummaryGuestItem>();
   for (const g of activeGuests) {
@@ -346,6 +358,7 @@ export async function getMealSummary(params: {
   >();
 
   for (const r of records) {
+    if (r.quantity <= 0) continue;
     const amountPoisha = r.quantity * r.unitPricePoisha;
     const existingGuest = guestMap.get(r.userId) ?? {
       userId: r.userId,

@@ -1,5 +1,10 @@
 import { prisma } from "@/lib/prisma";
-import { ensureMonthSchedule, getSettings, isWorkingDay } from "@/services/schedule.service";
+import {
+  ensureMonthSchedule,
+  getSettings,
+  isWorkingDay,
+  reconcileClosedDayRecordsInMemory,
+} from "@/services/schedule.service";
 import {
   getMonthDateRange,
   getNowInTimezone,
@@ -44,6 +49,7 @@ export async function getGuestDashboardData(userId: string) {
     ]);
 
   const holidayMap = new Map(holidays.map((h) => [h.date, h]));
+  await reconcileClosedDayRecordsInMemory(monthRecords, settings, holidayMap);
   const todayRec = monthRecords.find((r) => r.date === now.dateStr) ?? null;
   const tomorrowRec = monthRecords.find((r) => r.date === tomorrow) ?? null;
   const tomorrowLocked = isPastMealDeadline(

@@ -7,7 +7,13 @@ import {
   UserRole,
 } from "@prisma/client";
 import { logActivity } from "./activity.service";
-import { getSettings, isWorkingDay, resolveMealPrice } from "./schedule.service";
+import {
+  getSettings,
+  isInvalidClosedDayRecord,
+  isWorkingDay,
+  resetClosedDayRecordsByIds,
+  resolveMealPrice,
+} from "./schedule.service";
 import { recalculateInvoice } from "./invoice.service";
 
 export class MealServiceError extends Error {
@@ -204,8 +210,12 @@ export async function updateMealQuantity(input: UpdateMealInput) {
         const futureHolidayMap = new Map(futureHolidays.map((h) => [h.date, h]));
 
         const idsToUpdate: string[] = [];
+        const staleClosedIds: string[] = [];
         for (const fRec of futureRecords) {
           if (!isWorkingDay(fRec.date, settings, futureHolidayMap)) {
+            if (isInvalidClosedDayRecord(fRec)) {
+              staleClosedIds.push(fRec.id);
+            }
             continue;
           }
           if (
@@ -230,10 +240,14 @@ export async function updateMealQuantity(input: UpdateMealInput) {
               quantity,
               source: MealSource.FOLLOWING_RULE,
               overrideScope: MealOverrideScope.FOLLOWING_DATES,
-              isCustomized: true,
+              isCustomized: false,
             },
           });
           updatedFollowingCount += idsToUpdate.length;
+        }
+
+        if (staleClosedIds.length > 0) {
+          await resetClosedDayRecordsByIds(staleClosedIds, tx);
         }
 
         if (missingPreStartDates.length > 0) {
@@ -247,7 +261,7 @@ export async function updateMealQuantity(input: UpdateMealInput) {
               unitPricePoisha: resolveMealPrice(d, settings, monthPriceMap),
               source: MealSource.FOLLOWING_RULE,
               overrideScope: MealOverrideScope.FOLLOWING_DATES,
-              isCustomized: true,
+              isCustomized: false,
               isFinalized: false,
             }));
 

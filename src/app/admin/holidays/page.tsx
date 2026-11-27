@@ -16,6 +16,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { TableSkeleton } from "@/components/ui/loading-state";
+import { invalidateCalendarCache } from "@/lib/calendar-cache";
+import { invalidateDashboardCache } from "@/lib/dashboard-cache";
 import { toast } from "sonner";
 
 interface HolidayRow {
@@ -78,6 +80,8 @@ export default function AdminHolidaysPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to save holiday");
       toast.success(`Saved ${json.holidays.length} calendar date(s)`);
+      invalidateCalendarCache();
+      invalidateDashboardCache();
       setStartDate("");
       setEndDate("");
       setName("");
@@ -97,6 +101,8 @@ export default function AdminHolidaysPage() {
       const res = await fetch(`/api/holidays/${deleteTarget.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to remove");
       toast.success("Holiday removed");
+      invalidateCalendarCache();
+      invalidateDashboardCache();
       setDeleteTarget(null);
       loadHolidays();
     } catch (err) {

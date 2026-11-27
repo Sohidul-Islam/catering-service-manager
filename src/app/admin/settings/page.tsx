@@ -7,6 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input, Label } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { poishaToBdt } from "@/lib/money";
+import { invalidateCalendarCache } from "@/lib/calendar-cache";
+import { invalidateDashboardCache } from "@/lib/dashboard-cache";
 import { toast } from "sonner";
 
 export default function AdminSettingsPage() {
@@ -72,6 +74,8 @@ export default function AdminSettingsPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to update settings");
+      invalidateCalendarCache();
+      invalidateDashboardCache();
       toast.success("Organization settings saved");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Save failed");

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin, requireAuth } from "@/services/auth.service";
 import { getDateRange } from "@/lib/timezone";
 import { logActivity } from "@/services/activity.service";
+import { syncScheduleForDates } from "@/services/schedule.service";
 import { handleApiError } from "@/lib/api-utils";
 import { HolidayType } from "@prisma/client";
 
@@ -69,16 +70,10 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        // If meals are disallowed on a holiday, reset non-customized future/existing records to 0
-        if (!data.allowMeals) {
-          await tx.mealRecord.updateMany({
-            where: { date: dateStr, isCustomized: false, isFinalized: false },
-            data: { quantity: 0 },
-          });
-        }
-
         results.push(holiday);
       }
+
+      await syncScheduleForDates(dates, tx);
 
       await logActivity({
         tx,

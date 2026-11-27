@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/services/auth.service";
-import { ensureMonthSchedule, getSettings } from "@/services/schedule.service";
+import {
+  ensureMonthSchedule,
+  getSettings,
+  reconcileClosedDayRecordsInMemory,
+} from "@/services/schedule.service";
 import { getGuestDashboardData } from "@/services/guest-dashboard.service";
 import { getMonthDateRange, getNowInTimezone, getTomorrowDateStr } from "@/lib/timezone";
 import { handleApiError } from "@/lib/api-utils";
@@ -23,6 +27,7 @@ export async function GET() {
       const [
         activeGuestsCount,
         monthRecords,
+        monthHolidays,
         monthInvoices,
         pendingRequestsCount,
         upcomingHolidays,
@@ -30,6 +35,9 @@ export async function GET() {
       ] = await Promise.all([
         prisma.user.count({ where: { role: UserRole.GUEST, status: UserStatus.ACTIVE } }),
         prisma.mealRecord.findMany({
+          where: { date: { gte: startDate, lte: endDate } },
+        }),
+        prisma.holiday.findMany({
           where: { date: { gte: startDate, lte: endDate } },
         }),
         prisma.invoice.findMany({
@@ -54,6 +62,9 @@ export async function GET() {
           orderBy: { name: "asc" },
         }),
       ]);
+
+      const holidayMap = new Map(monthHolidays.map((h) => [h.date, h]));
+      await reconcileClosedDayRecordsInMemory(monthRecords, settings, holidayMap);
 
       let todayMeals = 0;
       let tomorrowMeals = 0;

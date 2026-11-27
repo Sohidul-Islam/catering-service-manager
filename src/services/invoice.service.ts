@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getMonthDateRange } from "@/lib/timezone";
 import { InvoiceStatus, Prisma, UserRole } from "@prisma/client";
 import { logActivity } from "./activity.service";
+import { getSettings, reconcileClosedDayRecordsInMemory } from "./schedule.service";
 
 export function computeInvoiceStatus(
   totalAmountPoisha: number,
@@ -60,7 +61,11 @@ export async function generateMonthlyInvoices(
   const startDate = dates[0];
   const endDate = dates[dates.length - 1];
 
-  const [guests, allRecords, existingInvoices] = await Promise.all([
+  const [settings, holidays, guests, allRecords, existingInvoices] = await Promise.all([
+    getSettings(),
+    prisma.holiday.findMany({
+      where: { date: { gte: startDate, lte: endDate } },
+    }),
     prisma.user.findMany({
       where: {
         role: UserRole.GUEST,
@@ -84,6 +89,9 @@ export async function generateMonthlyInvoices(
       include: { items: true, payments: true },
     }),
   ]);
+
+  const holidayMap = new Map(holidays.map((h) => [h.date, h]));
+  await reconcileClosedDayRecordsInMemory(allRecords, settings, holidayMap);
 
   const recordsByGuest = new Map<string, typeof allRecords>();
   for (const rec of allRecords) {

@@ -1,13 +1,19 @@
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import {
+  getDateRange,
   getDayOfWeek,
   getMonthDateRange,
   getNextDateStr,
   getNowInTimezone,
   parseDateStr,
 } from "@/lib/timezone";
-import { ensureMonthSchedule, getSettings, isWorkingDay } from "./schedule.service";
+import {
+  cleanupClosedDayRecords,
+  ensureMonthSchedule,
+  getSettings,
+  isWorkingDay,
+} from "./schedule.service";
 import { logActivity } from "./activity.service";
 import { UserRole } from "@prisma/client";
 
@@ -162,27 +168,29 @@ export async function getPublicVendorMealSummary(
   const endDate = monthDates[monthDates.length - 1];
   const queryEndDate = tomorrow > endDate ? tomorrow : endDate;
 
-  const [groupedCounts, holidays] = await Promise.all([
-    prisma.mealRecord.groupBy({
-      by: ["date"],
-      where: {
-        date: { gte: startDate, lte: queryEndDate },
-        quantity: { gt: 0 },
-        user: { role: UserRole.GUEST },
-      },
-      _sum: { quantity: true },
-    }),
-    prisma.holiday.findMany({
-      where: { date: { gte: startDate, lte: endDate } },
-    }),
-  ]);
+  const holidays = await prisma.holiday.findMany({
+    where: { date: { gte: startDate, lte: queryEndDate } },
+  });
+  const holidayMap = new Map(holidays.map((h) => [h.date, h]));
+  const closedDates = getDateRange(startDate, queryEndDate).filter(
+    (d) => !isWorkingDay(d, settings, holidayMap)
+  );
+  await cleanupClosedDayRecords(closedDates);
+
+  const groupedCounts = await prisma.mealRecord.groupBy({
+    by: ["date"],
+    where: {
+      date: { gte: startDate, lte: queryEndDate },
+      quantity: { gt: 0 },
+      user: { role: UserRole.GUEST },
+    },
+    _sum: { quantity: true },
+  });
 
   const countByDate = new Map<string, number>();
   for (const row of groupedCounts) {
     countByDate.set(row.date, row._sum.quantity ?? 0);
   }
-
-  const holidayMap = new Map(holidays.map((h) => [h.date, h]));
 
   let monthTotalMeals = 0;
   const days: VendorDayMealCount[] = monthDates.map((dateStr) => {

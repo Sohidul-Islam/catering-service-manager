@@ -5,6 +5,7 @@ import {
   ensureMonthSchedule,
   getSettings,
   isWorkingDay,
+  reconcileClosedDayRecordsInMemory,
   resolveMealPrice,
 } from "@/services/schedule.service";
 import {
@@ -115,6 +116,7 @@ export async function GET(req: NextRequest) {
     }
 
     const holidayMap = new Map(holidays.map((h) => [h.date, h]));
+    await reconcileClosedDayRecordsInMemory(records, settings, holidayMap);
     const priceMap = new Map(prices.map((p) => [p.date, p]));
     const priceValueMap = new Map(prices.map((p) => [p.date, p.pricePoisha]));
 

@@ -815,7 +815,7 @@ export function MealCalendar({
   }
 
   function renderDayStatusBadge(day: CalendarDay) {
-    if (day.holiday && day.holiday.type !== "SPECIAL_WORKING_DAY") {
+    if (day.holiday && !day.isWorkingDay) {
       return (
         <Badge variant="muted" className="text-[10px] px-1.5 py-0">
           <CalendarOff className="h-3 w-3" /> Closed
@@ -1116,6 +1116,7 @@ export function MealCalendar({
                               </p>
                             )}
                           {showSingleGuestCell &&
+                            day.isWorkingDay &&
                             day.records[0]?.source === "FOLLOWING_RULE" && (
                               <p className="text-[10px] text-violet-600 font-medium">
                                 Following rule

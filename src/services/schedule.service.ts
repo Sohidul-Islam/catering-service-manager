@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getDayOfWeek, getMonthDateRange } from "@/lib/timezone";
+import { getDayOfWeek, getMonthDateRange, parseDateStr } from "@/lib/timezone";
 import {
   Holiday,
   MealOverrideScope,
@@ -7,6 +7,7 @@ import {
   MealRuleHistory,
   MealSource,
   OrganizationSettings,
+  Prisma,
   UserRole,
   UserStatus,
 } from "@prisma/client";
@@ -136,21 +137,24 @@ type MealRecordCreateInput = {
  * Inserts meal records in batches to avoid interactive transaction timeouts on
  * remote LibSQL/Turso, falling back to upserts only if a concurrent request races.
  */
-async function insertMealRecordsIdempotently(records: MealRecordCreateInput[]): Promise<void> {
+async function insertMealRecordsIdempotently(
+  records: MealRecordCreateInput[],
+  db: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<void> {
   if (records.length === 0) return;
 
   const CHUNK_SIZE = 50;
   for (let i = 0; i < records.length; i += CHUNK_SIZE) {
     const chunk = records.slice(i, i + CHUNK_SIZE);
     try {
-      await prisma.mealRecord.createMany({ data: chunk });
+      await db.mealRecord.createMany({ data: chunk });
     } catch (error: unknown) {
       const code = (error as { code?: string } | null)?.code;
       if (code !== "P2002") {
         throw error;
       }
       for (const item of chunk) {
-        await prisma.mealRecord.upsert({
+        await db.mealRecord.upsert({
           where: { userId_date: { userId: item.userId, date: item.date } },
           update: {},
           create: item,
@@ -158,6 +162,294 @@ async function insertMealRecordsIdempotently(records: MealRecordCreateInput[]): 
       }
     }
   }
+}
+
+export function isInvalidClosedDayRecord(record: {
+  isFinalized: boolean;
+  source: MealSource;
+  quantity: number;
+}): boolean {
+  if (record.isFinalized) return false;
+  if (record.quantity <= 0 && record.source !== MealSource.FOLLOWING_RULE) return false;
+  return (
+    record.source === MealSource.DEFAULT ||
+    record.source === MealSource.FOLLOWING_RULE ||
+    record.source === MealSource.GUEST_OVERRIDE
+  );
+}
+
+export async function resetClosedDayRecordsByIds(
+  ids: string[],
+  db: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<void> {
+  if (ids.length === 0) return;
+
+  const CHUNK_SIZE = 200;
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+    await db.mealRecord.updateMany({
+      where: { id: { in: ids.slice(i, i + CHUNK_SIZE) }, isFinalized: false },
+      data: {
+        quantity: 0,
+        source: MealSource.DEFAULT,
+        overrideScope: null,
+        isCustomized: false,
+      },
+    });
+  }
+}
+
+export async function reconcileClosedDayRecordsInMemory<
+  T extends {
+    id: string;
+    date: string;
+    quantity: number;
+    source: MealSource;
+    overrideScope: MealOverrideScope | null;
+    isCustomized: boolean;
+    isFinalized: boolean;
+  },
+>(
+  records: T[],
+  settings: Pick<OrganizationSettings, "weekendDays">,
+  holidayMap: Map<string, Pick<Holiday, "type" | "allowMeals">>,
+  db: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<number> {
+  const staleIds: string[] = [];
+  for (const rec of records) {
+    if (!isWorkingDay(rec.date, settings, holidayMap) && isInvalidClosedDayRecord(rec)) {
+      rec.quantity = 0;
+      rec.source = MealSource.DEFAULT;
+      rec.overrideScope = null;
+      rec.isCustomized = false;
+      staleIds.push(rec.id);
+    }
+  }
+  if (staleIds.length > 0) {
+    await resetClosedDayRecordsByIds(staleIds, db);
+  }
+  return staleIds.length;
+}
+
+export async function cleanupClosedDayRecords(
+  closedDates: string[],
+  db: Prisma.TransactionClient | typeof prisma = prisma,
+  includeAdminFollowing = false
+): Promise<number> {
+  if (closedDates.length === 0) return 0;
+
+  const res = await db.mealRecord.updateMany({
+    where: {
+      date: { in: closedDates },
+      isFinalized: false,
+      AND: [
+        { OR: [{ quantity: { gt: 0 } }, { source: MealSource.FOLLOWING_RULE }] },
+        {
+          OR: [
+            {
+              source: {
+                in: [
+                  MealSource.DEFAULT,
+                  MealSource.FOLLOWING_RULE,
+                  MealSource.GUEST_OVERRIDE,
+                ],
+              },
+            },
+            ...(includeAdminFollowing
+              ? [
+                  {
+                    source: MealSource.ADMIN_OVERRIDE,
+                    overrideScope: MealOverrideScope.FOLLOWING_DATES,
+                  },
+                ]
+              : []),
+          ],
+        },
+      ],
+    },
+    data: {
+      quantity: 0,
+      source: MealSource.DEFAULT,
+      overrideScope: null,
+      isCustomized: false,
+    },
+  });
+
+  return res.count;
+}
+
+export async function syncScheduleForDates(
+  dates: string[],
+  db: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<void> {
+  const uniqueDates = Array.from(new Set(dates)).sort();
+  if (uniqueDates.length === 0) return;
+
+  const [existingSettings, holidays] = await Promise.all([
+    db.organizationSettings.findUnique({ where: { id: "default" } }),
+    db.holiday.findMany({ where: { date: { in: uniqueDates } } }),
+  ]);
+  const settings = existingSettings ?? (await getSettings());
+  const holidayMap = new Map(holidays.map((h) => [h.date, h]));
+
+  const closedDates: string[] = [];
+  const openDates: string[] = [];
+  for (const dateStr of uniqueDates) {
+    if (isWorkingDay(dateStr, settings, holidayMap)) {
+      openDates.push(dateStr);
+    } else {
+      closedDates.push(dateStr);
+    }
+  }
+
+  if (closedDates.length > 0) {
+    await cleanupClosedDayRecords(closedDates, db, true);
+  }
+
+  if (openDates.length === 0) return;
+
+  const monthMap = new Map<string, { year: number; month: number }>();
+  for (const dateStr of openDates) {
+    const { year, month } = parseDateStr(dateStr);
+    monthMap.set(`${year}-${month}`, { year, month });
+  }
+  const monthPairs = Array.from(monthMap.values());
+
+  const [existingSchedules, mealPrices, activeGuests, existingRecords, followingRules] =
+    await Promise.all([
+      db.monthlyMealSchedule.findMany({
+        where: { OR: monthPairs },
+        select: { year: true, month: true },
+      }),
+      db.mealPrice.findMany({
+        where: { date: { in: openDates } },
+      }),
+      db.user.findMany({
+        where: { role: UserRole.GUEST, status: UserStatus.ACTIVE },
+        select: {
+          id: true,
+          mealPreference: true,
+          defaultMealQty: true,
+          mealStartDate: true,
+        },
+      }),
+      db.mealRecord.findMany({
+        where: { date: { in: openDates } },
+        select: {
+          id: true,
+          userId: true,
+          date: true,
+          quantity: true,
+          source: true,
+          overrideScope: true,
+          isCustomized: true,
+          isFinalized: true,
+        },
+      }),
+      db.mealRuleHistory.findMany({
+        where: {
+          scope: MealOverrideScope.FOLLOWING_DATES,
+          effectiveFrom: { lte: openDates[openDates.length - 1] },
+        },
+        select: {
+          userId: true,
+          effectiveFrom: true,
+          quantity: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+  const generatedMonthSet = new Set(existingSchedules.map((s) => `${s.year}-${s.month}`));
+  const priceMap = new Map(mealPrices.map((p) => [p.date, p.pricePoisha]));
+  const existingMap = new Map(existingRecords.map((r) => [`${r.userId}::${r.date}`, r]));
+
+  const rulesByGuest = new Map<
+    string,
+    Pick<MealRuleHistory, "effectiveFrom" | "quantity" | "createdAt">[]
+  >();
+  for (const r of followingRules) {
+    const list = rulesByGuest.get(r.userId) ?? [];
+    list.push(r);
+    rulesByGuest.set(r.userId, list);
+  }
+
+  const updateBuckets = new Map<
+    string,
+    {
+      quantity: number;
+      source: MealSource;
+      overrideScope: MealOverrideScope | null;
+      ids: string[];
+    }
+  >();
+  const toCreate: MealRecordCreateInput[] = [];
+
+  for (const dateStr of openDates) {
+    const { year, month } = parseDateStr(dateStr);
+    const isMonthGenerated = generatedMonthSet.has(`${year}-${month}`);
+    const unitPricePoisha = resolveMealPrice(dateStr, settings, priceMap);
+
+    for (const guest of activeGuests) {
+      const rule = resolveEffectiveMealRule(guest, dateStr, rulesByGuest.get(guest.id) ?? []);
+      if (!rule) continue;
+
+      const existing = existingMap.get(`${guest.id}::${dateStr}`);
+      if (existing) {
+        const canSync =
+          !existing.isFinalized &&
+          ((existing.source === MealSource.DEFAULT && !existing.isCustomized) ||
+            existing.source === MealSource.FOLLOWING_RULE);
+        if (!canSync) continue;
+
+        if (
+          existing.quantity === rule.quantity &&
+          existing.source === rule.source &&
+          existing.overrideScope === rule.overrideScope &&
+          !existing.isCustomized
+        ) {
+          continue;
+        }
+
+        const bucketKey = `${rule.quantity}::${rule.source}::${rule.overrideScope ?? "NULL"}`;
+        const bucket = updateBuckets.get(bucketKey) ?? {
+          quantity: rule.quantity,
+          source: rule.source,
+          overrideScope: rule.overrideScope,
+          ids: [],
+        };
+        bucket.ids.push(existing.id);
+        updateBuckets.set(bucketKey, bucket);
+      } else if (isMonthGenerated) {
+        toCreate.push({
+          userId: guest.id,
+          date: dateStr,
+          quantity: rule.quantity,
+          unitPricePoisha,
+          source: rule.source,
+          overrideScope: rule.overrideScope,
+          isCustomized: false,
+          isFinalized: false,
+        });
+      }
+    }
+  }
+
+  const CHUNK_SIZE = 200;
+  for (const bucket of updateBuckets.values()) {
+    for (let i = 0; i < bucket.ids.length; i += CHUNK_SIZE) {
+      await db.mealRecord.updateMany({
+        where: { id: { in: bucket.ids.slice(i, i + CHUNK_SIZE) }, isFinalized: false },
+        data: {
+          quantity: bucket.quantity,
+          source: bucket.source,
+          overrideScope: bucket.overrideScope,
+          isCustomized: false,
+        },
+      });
+    }
+  }
+
+  await insertMealRecordsIdempotently(toCreate, db);
 }
 
 /**
@@ -257,8 +549,8 @@ export async function ensureMonthSchedule(
         date: dateStr,
         quantity: working ? rule.quantity : 0,
         unitPricePoisha,
-        source: rule.source,
-        overrideScope: rule.overrideScope,
+        source: working ? rule.source : MealSource.DEFAULT,
+        overrideScope: working ? rule.overrideScope : null,
         isCustomized: false,
         isFinalized: false,
       });
@@ -266,6 +558,8 @@ export async function ensureMonthSchedule(
   }
 
   await insertMealRecordsIdempotently(toCreate);
+  const closedDates = dates.filter((d) => !isWorkingDay(d, settings, holidayMap));
+  await cleanupClosedDayRecords(closedDates);
 
   const schedule =
     !existingSchedule || forceLog
@@ -348,8 +642,8 @@ async function syncGuestSingleMonth(
       date: dateStr,
       quantity: working ? rule.quantity : 0,
       unitPricePoisha,
-      source: rule.source,
-      overrideScope: rule.overrideScope,
+      source: working ? rule.source : MealSource.DEFAULT,
+      overrideScope: working ? rule.overrideScope : null,
       isCustomized: false,
       isFinalized: false,
     });

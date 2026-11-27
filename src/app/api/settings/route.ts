@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin, requireAuth } from "@/services/auth.service";
-import { getSettings } from "@/services/schedule.service";
+import { getSettings, syncScheduleForDates } from "@/services/schedule.service";
 import { bdtToPoisha } from "@/lib/money";
 import { logActivity } from "@/services/activity.service";
 import { handleApiError } from "@/lib/api-utils";
@@ -46,6 +46,15 @@ export async function PATCH(req: NextRequest) {
         weekendDays: data.weekendDays,
       },
     });
+
+    if (existing.weekendDays !== updated.weekendDays) {
+      const unfinalizedDates = await prisma.mealRecord.findMany({
+        where: { isFinalized: false },
+        distinct: ["date"],
+        select: { date: true },
+      });
+      await syncScheduleForDates(unfinalizedDates.map((d) => d.date));
+    }
 
     await logActivity({
       actorId: admin.id,
