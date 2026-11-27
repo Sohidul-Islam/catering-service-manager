@@ -260,10 +260,10 @@ export default function AdminReportsPage() {
             <Card>
               <CardContent className="p-4">
                 <p className="text-xs text-slate-500">
-                  {guestId ? "Guest Total (Year / All-Time)" : `Total Meals (${year} / All-Time)`}
+                  {guestId ? `Guest Total (${year})` : `Total Meals (${year})`}
                 </p>
                 <p className="mt-1 text-xl font-bold text-blue-700">
-                  {data.mealReport.yearTotalMeals} / {data.mealReport.allTimeTotalMeals}
+                  {data.mealReport.yearTotalMeals}
                 </p>
               </CardContent>
             </Card>
@@ -378,7 +378,6 @@ export default function AdminReportsPage() {
                     <TableHead>Guest</TableHead>
                     <TableHead className="text-right">Days Taken</TableHead>
                     <TableHead className="text-right">Period Meals</TableHead>
-                    <TableHead className="text-right">All-Time Meals</TableHead>
                     <TableHead className="text-right">Period Expense</TableHead>
                     <TableHead className="text-right">Details</TableHead>
                   </TableRow>
@@ -397,9 +396,6 @@ export default function AdminReportsPage() {
                       </TableCell>
                       <TableCell className="text-right text-slate-600">{g.mealDays}</TableCell>
                       <TableCell className="text-right font-semibold">{g.totalMeals}</TableCell>
-                      <TableCell className="text-right font-bold text-blue-700">
-                        {g.allTimeMeals}
-                      </TableCell>
                       <TableCell className="text-right font-semibold">
                         {formatBDT(g.totalAmountPoisha)}
                       </TableCell>
@@ -437,8 +433,7 @@ export default function AdminReportsPage() {
                     <CardTitle>{selectedGuestName} — Day-wise Meal History</CardTitle>
                     <CardDescription>
                       Period total: {data.mealReport.totalMeals} meal(s) • {year} total:{" "}
-                      {data.mealReport.yearTotalMeals} meal(s) • All-time total:{" "}
-                      {data.mealReport.allTimeTotalMeals} meal(s)
+                      {data.mealReport.yearTotalMeals} meal(s)
                     </CardDescription>
                   </div>
                   <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
