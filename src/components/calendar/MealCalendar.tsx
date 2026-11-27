@@ -817,8 +817,12 @@ export function MealCalendar({
   function renderDayStatusBadge(day: CalendarDay) {
     if (day.holiday && !day.isWorkingDay) {
       return (
-        <Badge variant="muted" className="text-[10px] px-1.5 py-0">
-          <CalendarOff className="h-3 w-3" /> Closed
+        <Badge
+          variant="muted"
+          className="text-[10px] px-1.5 py-0 bg-rose-100 text-rose-700 border border-rose-300"
+        >
+          <CalendarOff className="h-3 w-3" />{" "}
+          {day.holiday.type === "OFFICE_CLOSED" ? "Office Closed" : "Holiday • Closed"}
         </Badge>
       );
     }
@@ -1007,6 +1011,9 @@ export function MealCalendar({
             <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Locked (Past 11:50 PM)
           </span>
           <span className="inline-flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-rose-500" /> Holiday / Office Closed
+          </span>
+          <span className="inline-flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full bg-blue-500" /> Special Working Day
           </span>
         </div>
@@ -1041,6 +1048,7 @@ export function MealCalendar({
 
               const dayNum = Number(day.date.slice(8));
               const myQty = day.records[0]?.quantity ?? 0;
+              const isClosedHoliday = Boolean(day.holiday && !day.isWorkingDay);
 
               return (
                 <button
@@ -1049,7 +1057,9 @@ export function MealCalendar({
                   onClick={() => openDayModal(day)}
                   className={cn(
                     "min-h-[118px] p-2.5 text-left border-b border-r border-slate-200 flex flex-col justify-between transition-colors hover:bg-blue-50/40 cursor-pointer",
-                    !day.isWorkingDay && "bg-slate-50/80",
+                    !day.isWorkingDay && !isClosedHoliday && "bg-slate-50/80",
+                    isClosedHoliday &&
+                      "bg-rose-50/85 hover:bg-rose-100/70 ring-1 ring-inset ring-rose-200/80",
                     day.holiday?.type === "SPECIAL_WORKING_DAY" && "bg-blue-50/30",
                     day.isToday && "ring-2 ring-inset ring-blue-500 bg-blue-50/20"
                   )}
@@ -1060,7 +1070,9 @@ export function MealCalendar({
                         "inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
                         day.isToday
                           ? "bg-blue-600 text-white"
-                          : "text-slate-700"
+                          : isClosedHoliday
+                            ? "bg-rose-100 text-rose-700 font-bold"
+                            : "text-slate-700"
                       )}
                     >
                       {dayNum}
@@ -1079,7 +1091,15 @@ export function MealCalendar({
 
                   <div className="my-1.5 space-y-1">
                     {day.holiday && (
-                      <p className="text-[11px] font-medium text-slate-600 truncate">
+                      <p
+                        title={day.holiday.name}
+                        className={cn(
+                          "text-[11px] font-semibold rounded px-1.5 py-0.5 truncate border",
+                          isClosedHoliday
+                            ? "text-rose-700 bg-rose-100/80 border-rose-200"
+                            : "text-blue-700 bg-blue-100/70 border-blue-200"
+                        )}
+                      >
                         {day.holiday.name}
                       </p>
                     )}
@@ -1155,12 +1175,15 @@ export function MealCalendar({
               showSingleGuestCell &&
               Boolean(data?.guestMealStartDate) &&
               day.date < data!.guestMealStartDate!;
+            const isClosedHoliday = Boolean(day.holiday && !day.isWorkingDay);
             return (
               <Card
                 key={day.date}
                 onClick={() => openDayModal(day)}
                 className={cn(
                   "p-3.5 flex items-center justify-between gap-3 cursor-pointer active:bg-slate-50",
+                  isClosedHoliday && "border-rose-200 bg-rose-50/70",
+                  day.holiday && day.isWorkingDay && "border-blue-200 bg-blue-50/40",
                   day.isToday && "border-blue-500 ring-1 ring-blue-500"
                 )}
               >
@@ -1190,7 +1213,14 @@ export function MealCalendar({
                       ) : null)}
                   </div>
                   {day.holiday && (
-                    <p className="mt-0.5 text-xs text-slate-600">{day.holiday.name}</p>
+                    <p
+                      className={cn(
+                        "mt-0.5 text-xs font-semibold",
+                        isClosedHoliday ? "text-rose-700" : "text-blue-700"
+                      )}
+                    >
+                      {day.holiday.name}
+                    </p>
                   )}
                 </div>
                 <div>{renderDayStatusBadge(day)}</div>
@@ -1217,8 +1247,22 @@ export function MealCalendar({
         {selectedDay && (
           <div className="space-y-4">
             {selectedDay.holiday && (
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+              <div
+                className={cn(
+                  "rounded-lg border p-3 text-xs",
+                  !selectedDay.isWorkingDay
+                    ? "border-rose-200 bg-rose-50 text-rose-900"
+                    : "border-blue-200 bg-blue-50 text-blue-900"
+                )}
+              >
                 <p className="font-semibold">{selectedDay.holiday.name}</p>
+                {!selectedDay.isWorkingDay && (
+                  <p className="mt-0.5 font-medium text-rose-700">
+                    {selectedDay.holiday.type === "OFFICE_CLOSED"
+                      ? "Office Closed — Lunch Service Closed"
+                      : "Public Holiday — Lunch Service Closed"}
+                  </p>
+                )}
                 {selectedDay.holiday.note && <p className="mt-0.5">{selectedDay.holiday.note}</p>}
               </div>
             )}

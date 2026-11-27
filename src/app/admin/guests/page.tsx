@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
@@ -38,6 +38,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TablePagination,
   TableRow,
 } from "@/components/ui/table";
 import { formatBDT } from "@/lib/money";
@@ -60,24 +61,28 @@ interface GuestRow {
   outstandingPoisha: number;
 }
 
+const PAGE_SIZE = 20;
+
 export default function AdminGuestsPage() {
   const guestsSchema = useMemo(
     () => ({
       search: filterCodecs.string(""),
       status: filterCodecs.enum(["", "ACTIVE", "INVITED", "INACTIVE"] as const, ""),
       preference: filterCodecs.enum(["", "REGULAR", "OCCASIONAL"] as const, ""),
+      page: filterCodecs.int(1, { min: 1 }),
     }),
     []
   );
 
   const {
-    filters: { search, status: statusFilter, preference: preferenceFilter },
+    filters: { search, status: statusFilter, preference: preferenceFilter, page },
     setFilter,
     resetFilters,
     hasActiveFilters,
-  } = useUrlFilters(guestsSchema);
+  } = useUrlFilters(guestsSchema, { resetKeysOnFilterChange: ["page"] });
 
   const [guests, setGuests] = useState<GuestRow[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -164,23 +169,50 @@ export default function AdminGuestsPage() {
   const [mealStartDate, setMealStartDate] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  async function loadGuests() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/guests");
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to load guests");
-      setGuests(json.guests);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load guests");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const loadGuests = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      try {
+        const trimmedSearch = search.trim();
+        const qs = new URLSearchParams({
+          page: String(page),
+          pageSize: String(PAGE_SIZE),
+          ...(statusFilter ? { status: statusFilter } : {}),
+          ...(preferenceFilter ? { preference: preferenceFilter } : {}),
+          ...(trimmedSearch ? { search: trimmedSearch } : {}),
+        });
+        const res = await fetch(`/api/guests?${qs.toString()}`, { signal });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Failed to load guests");
+        setGuests(json.guests);
+        setTotal(json.pagination?.total ?? json.guests.length);
+        if (json.pagination?.page && json.pagination.page !== page) {
+          setFilter("page", json.pagination.page);
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        toast.error(err instanceof Error ? err.message : "Failed to load guests");
+      } finally {
+        if (!signal?.aborted) {
+          setLoading(false);
+        }
+      }
+    },
+    [page, preferenceFilter, search, setFilter, statusFilter]
+  );
 
   useEffect(() => {
-    loadGuests();
-  }, []);
+    const controller = new AbortController();
+    const delay = search.trim() ? 250 : 0;
+    const timer = setTimeout(() => {
+      void loadGuests(controller.signal);
+    }, delay);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [loadGuests, search]);
 
   async function handleInviteSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -451,28 +483,7 @@ export default function AdminGuestsPage() {
       <Card>
         <CardHeader className="flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            {(() => {
-              const q = search.trim().toLowerCase();
-              const filteredCount = guests.filter((g) => {
-                if (statusFilter && g.status !== statusFilter) return false;
-                if (preferenceFilter && g.mealPreference !== preferenceFilter) return false;
-                if (
-                  q &&
-                  !g.name.toLowerCase().includes(q) &&
-                  !g.email.toLowerCase().includes(q) &&
-                  !(g.phone?.toLowerCase().includes(q) ?? false)
-                ) {
-                  return false;
-                }
-                return true;
-              }).length;
-              return (
-                <CardTitle>
-                  All Guests ({filteredCount}
-                  {filteredCount !== guests.length ? ` of ${guests.length}` : ""})
-                </CardTitle>
-              );
-            })()}
+            <CardTitle>All Guests ({total})</CardTitle>
             <CardDescription>Inactive guests retain history but receive no new schedules</CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -518,31 +529,12 @@ export default function AdminGuestsPage() {
         <CardContent>
           {loading ? (
             <TableSkeleton rows={5} label="Loading guests..." />
-          ) : (() => {
-            const q = search.trim().toLowerCase();
-            const filteredGuests = guests.filter((g) => {
-              if (statusFilter && g.status !== statusFilter) return false;
-              if (preferenceFilter && g.mealPreference !== preferenceFilter) return false;
-              if (
-                q &&
-                !g.name.toLowerCase().includes(q) &&
-                !g.email.toLowerCase().includes(q) &&
-                !(g.phone?.toLowerCase().includes(q) ?? false)
-              ) {
-                return false;
-              }
-              return true;
-            });
-
-            if (filteredGuests.length === 0) {
-              return (
-                <p className="text-sm text-slate-500 py-6 text-center">
-                  {guests.length === 0 ? "No guests yet." : "No guests match your filters."}
-                </p>
-              );
-            }
-
-            return (
+          ) : guests.length === 0 ? (
+            <p className="text-sm text-slate-500 py-6 text-center">
+              {hasActiveFilters ? "No guests match your filters." : "No guests yet."}
+            </p>
+          ) : (
+            <>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -556,7 +548,7 @@ export default function AdminGuestsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredGuests.map((g) => (
+                  {guests.map((g) => (
                     <TableRow key={g.id}>
                       <TableCell>
                         <Link
@@ -662,8 +654,15 @@ export default function AdminGuestsPage() {
                   ))}
                 </TableBody>
               </Table>
-            );
-          })()}
+              <TablePagination
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={total}
+                onPageChange={(nextPage) => setFilter("page", nextPage)}
+                disabled={loading}
+              />
+            </>
+          )}
         </CardContent>
       </Card>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   CheckCircle2,
@@ -27,6 +27,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TablePagination,
   TableRow,
 } from "@/components/ui/table";
 import { EmailPreviewData, EmailPreviewModal } from "@/components/email/EmailPreviewModal";
@@ -63,6 +64,8 @@ interface InvoiceRow {
   emailLogs?: { sentAt: string | null; recipientEmail: string }[];
 }
 
+const PAGE_SIZE = 20;
+
 export default function AdminInvoicesPage() {
   const invoicesSchema = useMemo(() => {
     const now = new Date();
@@ -71,17 +74,19 @@ export default function AdminInvoicesPage() {
       month: filterCodecs.int(now.getMonth() + 1, { min: 1, max: 12 }),
       status: filterCodecs.enum(["", "UNPAID", "PARTIALLY_PAID", "PAID"] as const, ""),
       search: filterCodecs.string(""),
+      page: filterCodecs.int(1, { min: 1 }),
     };
   }, []);
 
   const {
-    filters: { year, month, status, search },
+    filters: { year, month, status, search, page },
     setFilter,
     resetFilters,
     hasActiveFilters,
-  } = useUrlFilters(invoicesSchema);
+  } = useUrlFilters(invoicesSchema, { resetKeysOnFilterChange: ["page"] });
 
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [confirmGenerateOpen, setConfirmGenerateOpen] = useState(false);
@@ -96,34 +101,55 @@ export default function AdminInvoicesPage() {
   const [previewData, setPreviewData] = useState<EmailPreviewData | null>(null);
   const [emailInvoiceId, setEmailInvoiceId] = useState<string | null>(null);
 
-  async function loadInvoices() {
-    setLoading(true);
-    try {
-      const qs = new URLSearchParams({
-        year: String(year),
-        month: String(month),
-        ...(status ? { status } : {}),
-      });
-      const res = await fetch(`/api/invoices?${qs.toString()}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to load invoices");
-      setInvoices(json.invoices);
-      if (selectedInvoice) {
-        const refreshed = (json.invoices as InvoiceRow[]).find(
-          (i) => i.id === selectedInvoice.id
-        );
-        if (refreshed) setSelectedInvoice(refreshed);
+  const loadInvoices = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      try {
+        const trimmedSearch = search.trim();
+        const qs = new URLSearchParams({
+          year: String(year),
+          month: String(month),
+          page: String(page),
+          pageSize: String(PAGE_SIZE),
+          ...(status ? { status } : {}),
+          ...(trimmedSearch ? { search: trimmedSearch } : {}),
+        });
+        const res = await fetch(`/api/invoices?${qs.toString()}`, { signal });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Failed to load invoices");
+        setInvoices(json.invoices);
+        setTotal(json.pagination?.total ?? json.invoices.length);
+        if (json.pagination?.page && json.pagination.page !== page) {
+          setFilter("page", json.pagination.page);
+        }
+        setSelectedInvoice((prev) => {
+          if (!prev) return null;
+          return (json.invoices as InvoiceRow[]).find((i) => i.id === prev.id) ?? prev;
+        });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        toast.error(err instanceof Error ? err.message : "Failed to load invoices");
+      } finally {
+        if (!signal?.aborted) {
+          setLoading(false);
+        }
       }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load invoices");
-    } finally {
-      setLoading(false);
-    }
-  }
+    },
+    [month, page, search, setFilter, status, year]
+  );
 
   useEffect(() => {
-    loadInvoices();
-  }, [year, month, status]);
+    const controller = new AbortController();
+    const delay = search.trim() ? 250 : 0;
+    const timer = setTimeout(() => {
+      void loadInvoices(controller.signal);
+    }, delay);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [loadInvoices, search]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -252,16 +278,6 @@ export default function AdminInvoicesPage() {
     return `${window.location.origin}/invoice/${tok}`;
   }
 
-  const searchLower = search.trim().toLowerCase();
-  const visibleInvoices = searchLower
-    ? invoices.filter(
-        (inv) =>
-          inv.invoiceNumber.toLowerCase().includes(searchLower) ||
-          inv.user.name.toLowerCase().includes(searchLower) ||
-          inv.user.email.toLowerCase().includes(searchLower)
-      )
-    : invoices;
-
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -305,10 +321,7 @@ export default function AdminInvoicesPage() {
       <Card>
         <CardHeader className="flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <CardTitle>
-              Invoices ({visibleInvoices.length}
-              {visibleInvoices.length !== invoices.length ? ` of ${invoices.length}` : ""})
-            </CardTitle>
+            <CardTitle>Invoices ({total})</CardTitle>
             <CardDescription>
               Generate public share links or manually preview and send invoice emails
             </CardDescription>
@@ -345,28 +358,29 @@ export default function AdminInvoicesPage() {
         <CardContent>
           {loading ? (
             <TableSkeleton rows={5} label="Loading monthly invoices..." />
-          ) : visibleInvoices.length === 0 ? (
+          ) : invoices.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">
-              {invoices.length === 0
-                ? "No invoices match this month/filter yet."
-                : "No invoices match your search."}
+              {search.trim()
+                ? "No invoices match your search."
+                : "No invoices match this month/filter yet."}
             </p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Invoice #</TableHead>
-                  <TableHead>Guest</TableHead>
-                  <TableHead className="text-right">Meals</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="text-right">Due</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleInvoices.map((inv) => {
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Invoice #</TableHead>
+                    <TableHead>Guest</TableHead>
+                    <TableHead className="text-right">Meals</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead className="text-right">Due</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invoices.map((inv) => {
                   const balance = Math.max(0, inv.totalAmountPoisha - inv.paidAmountPoisha);
                   const lastSent = inv.emailLogs?.[0]?.sentAt ?? null;
                   const pubUrl = getPublicUrl(inv);
@@ -462,8 +476,16 @@ export default function AdminInvoicesPage() {
                     </TableRow>
                   );
                 })}
-              </TableBody>
-            </Table>
+                </TableBody>
+              </Table>
+              <TablePagination
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={total}
+                onPageChange={(nextPage) => setFilter("page", nextPage)}
+                disabled={loading}
+              />
+            </>
           )}
         </CardContent>
       </Card>

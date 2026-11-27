@@ -12,6 +12,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TablePagination,
   TableRow,
 } from "@/components/ui/table";
 import { useUrlFilters } from "@/hooks/useUrlFilters";
@@ -35,6 +36,8 @@ interface EmailLogRow {
   invoice: { invoiceNumber: string } | null;
 }
 
+const PAGE_SIZE = 20;
+
 export default function AdminEmailLogsPage() {
   const emailLogsSchema = useMemo(
     () => ({
@@ -52,47 +55,63 @@ export default function AdminEmailLogsPage() {
       ),
       status: filterCodecs.enum(["", "SENT", "FAILED", "PENDING"] as const, ""),
       search: filterCodecs.string(""),
+      page: filterCodecs.int(1, { min: 1 }),
     }),
     []
   );
 
   const {
-    filters: { emailType: typeFilter, status: statusFilter, search },
+    filters: { emailType: typeFilter, status: statusFilter, search, page },
     setFilter,
     resetFilters,
     hasActiveFilters,
-  } = useUrlFilters(emailLogsSchema);
+  } = useUrlFilters(emailLogsSchema, { resetKeysOnFilterChange: ["page"] });
 
   const [logs, setLogs] = useState<EmailLogRow[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    const qs = new URLSearchParams();
-    if (typeFilter) qs.set("emailType", typeFilter);
-    if (statusFilter) qs.set("status", statusFilter);
+    const controller = new AbortController();
+    const trimmedSearch = search.trim();
+    const delay = trimmedSearch ? 250 : 0;
 
-    fetch(`/api/emails/logs?${qs.toString()}`)
-      .then(async (res) => {
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || "Failed to load email logs");
-        setLogs(json.logs);
-      })
-      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed"))
-      .finally(() => setLoading(false));
-  }, [typeFilter, statusFilter]);
+    const timer = setTimeout(() => {
+      setLoading(true);
+      const qs = new URLSearchParams({
+        page: String(page),
+        pageSize: String(PAGE_SIZE),
+        ...(typeFilter ? { emailType: typeFilter } : {}),
+        ...(statusFilter ? { status: statusFilter } : {}),
+        ...(trimmedSearch ? { search: trimmedSearch } : {}),
+      });
 
-  const visibleLogs = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return logs;
-    return logs.filter(
-      (l) =>
-        l.recipientEmail.toLowerCase().includes(q) ||
-        l.subject.toLowerCase().includes(q) ||
-        (l.guest?.name.toLowerCase().includes(q) ?? false) ||
-        (l.invoice?.invoiceNumber.toLowerCase().includes(q) ?? false)
-    );
-  }, [logs, search]);
+      fetch(`/api/emails/logs?${qs.toString()}`, { signal: controller.signal })
+        .then(async (res) => {
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || "Failed to load email logs");
+          setLogs(json.logs);
+          setTotal(json.pagination?.total ?? json.logs.length);
+          if (json.pagination?.page && json.pagination.page !== page) {
+            setFilter("page", json.pagination.page);
+          }
+        })
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          toast.error(err instanceof Error ? err.message : "Failed");
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setLoading(false);
+          }
+        });
+    }, delay);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [page, search, setFilter, statusFilter, typeFilter]);
 
   return (
     <div className="space-y-4">
@@ -161,75 +180,81 @@ export default function AdminEmailLogsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>
-            Email Logs ({visibleLogs.length}
-            {visibleLogs.length !== logs.length ? ` of ${logs.length}` : ""})
-          </CardTitle>
+          <CardTitle>Email Logs ({total})</CardTitle>
           <CardDescription>Tracks message IDs, delivery status, and errors</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
             <TableSkeleton rows={5} label="Loading email logs..." />
-          ) : visibleLogs.length === 0 ? (
+          ) : logs.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">No email logs found.</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Recipient</TableHead>
-                  <TableHead>Related</TableHead>
-                  <TableHead>Sent By</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Details / Message ID</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleLogs.map((l) => (
-                  <TableRow key={l.id}>
-                    <TableCell className="text-xs text-slate-500 whitespace-nowrap">
-                      {new Date(l.sentAt || l.createdAt).toLocaleString()}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="info" className="text-[11px]">
-                        {l.emailType.replaceAll("_", " ")}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <p className="text-xs font-medium text-slate-900">
-                        {l.guest?.name || l.recipientEmail}
-                      </p>
-                      <p className="text-[11px] text-slate-500">{l.recipientEmail}</p>
-                    </TableCell>
-                    <TableCell className="text-xs text-slate-600">
-                      {l.mealDate || l.invoice?.invoiceNumber || "—"}
-                    </TableCell>
-                    <TableCell className="text-xs">{l.sentBy?.name || "Admin"}</TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          l.status === "SENT"
-                            ? "success"
-                            : l.status === "FAILED"
-                            ? "danger"
-                            : "warning"
-                        }
-                      >
-                        {l.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs text-slate-600 max-w-xs truncate">
-                      {l.errorMessage ? (
-                        <span className="text-red-600">{l.errorMessage}</span>
-                      ) : (
-                        <span className="font-mono text-[11px]">{l.resendMessageId || "—"}</span>
-                      )}
-                    </TableCell>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Recipient</TableHead>
+                    <TableHead>Related</TableHead>
+                    <TableHead>Sent By</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Details / Message ID</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {logs.map((l) => (
+                    <TableRow key={l.id}>
+                      <TableCell className="text-xs text-slate-500 whitespace-nowrap">
+                        {new Date(l.sentAt || l.createdAt).toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="info" className="text-[11px]">
+                          {l.emailType.replaceAll("_", " ")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <p className="text-xs font-medium text-slate-900">
+                          {l.guest?.name || l.recipientEmail}
+                        </p>
+                        <p className="text-[11px] text-slate-500">{l.recipientEmail}</p>
+                      </TableCell>
+                      <TableCell className="text-xs text-slate-600">
+                        {l.mealDate || l.invoice?.invoiceNumber || "—"}
+                      </TableCell>
+                      <TableCell className="text-xs">{l.sentBy?.name || "Admin"}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            l.status === "SENT"
+                              ? "success"
+                              : l.status === "FAILED"
+                              ? "danger"
+                              : "warning"
+                          }
+                        >
+                          {l.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-slate-600 max-w-xs truncate">
+                        {l.errorMessage ? (
+                          <span className="text-red-600">{l.errorMessage}</span>
+                        ) : (
+                          <span className="font-mono text-[11px]">{l.resendMessageId || "—"}</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <TablePagination
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={total}
+                onPageChange={(nextPage) => setFilter("page", nextPage)}
+                disabled={loading}
+              />
+            </>
           )}
         </CardContent>
       </Card>

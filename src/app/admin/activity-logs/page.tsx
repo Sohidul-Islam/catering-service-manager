@@ -12,6 +12,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TablePagination,
   TableRow,
 } from "@/components/ui/table";
 import { formatActivityDetails } from "@/lib/activity-format";
@@ -32,6 +33,8 @@ interface LogRow {
   actor: { name: string; role: string } | null;
   targetUser: { name: string } | null;
 }
+
+const PAGE_SIZE = 20;
 
 export default function AdminActivityLogsPage() {
   const activitySchema = useMemo(
@@ -54,45 +57,62 @@ export default function AdminActivityLogsPage() {
         ""
       ),
       search: filterCodecs.string(""),
+      page: filterCodecs.int(1, { min: 1 }),
     }),
     []
   );
 
   const {
-    filters: { action: actionFilter, search },
+    filters: { action: actionFilter, search, page },
     setFilter,
     resetFilters,
     hasActiveFilters,
-  } = useUrlFilters(activitySchema);
+  } = useUrlFilters(activitySchema, { resetKeysOnFilterChange: ["page"] });
 
   const [logs, setLogs] = useState<LogRow[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    const qs = actionFilter ? `?action=${encodeURIComponent(actionFilter)}` : "";
-    fetch(`/api/activity-logs${qs}`)
-      .then(async (res) => {
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || "Failed to load logs");
-        setLogs(json.logs);
-      })
-      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed"))
-      .finally(() => setLoading(false));
-  }, [actionFilter]);
+    const controller = new AbortController();
+    const trimmedSearch = search.trim();
+    const delay = trimmedSearch ? 250 : 0;
 
-  const visibleLogs = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return logs;
-    return logs.filter(
-      (l) =>
-        l.action.toLowerCase().includes(q) ||
-        (l.actor?.name.toLowerCase().includes(q) ?? false) ||
-        (l.targetUser?.name.toLowerCase().includes(q) ?? false) ||
-        (l.date?.includes(q) ?? false) ||
-        formatActivityDetails(l.previousValue, l.newValue, l.reason).toLowerCase().includes(q)
-    );
-  }, [logs, search]);
+    const timer = setTimeout(() => {
+      setLoading(true);
+      const qs = new URLSearchParams({
+        page: String(page),
+        pageSize: String(PAGE_SIZE),
+        ...(actionFilter ? { action: actionFilter } : {}),
+        ...(trimmedSearch ? { search: trimmedSearch } : {}),
+      });
+
+      fetch(`/api/activity-logs?${qs.toString()}`, { signal: controller.signal })
+        .then(async (res) => {
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || "Failed to load logs");
+          setLogs(json.logs);
+          setTotal(json.pagination?.total ?? json.logs.length);
+          if (json.pagination?.page && json.pagination.page !== page) {
+            setFilter("page", json.pagination.page);
+          }
+        })
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          toast.error(err instanceof Error ? err.message : "Failed");
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setLoading(false);
+          }
+        });
+    }, delay);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [actionFilter, page, search, setFilter]);
 
   return (
     <div className="space-y-4">
@@ -158,52 +178,58 @@ export default function AdminActivityLogsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>
-            Recent Activity ({visibleLogs.length}
-            {visibleLogs.length !== logs.length ? ` of ${logs.length}` : ""})
-          </CardTitle>
+          <CardTitle>Recent Activity ({total})</CardTitle>
           <CardDescription>Immutable chronological audit trail</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
             <TableSkeleton rows={5} label="Loading activity logs..." />
-          ) : visibleLogs.length === 0 ? (
+          ) : logs.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">No activity logs found.</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Actor</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>Target Guest</TableHead>
-                  <TableHead>Meal Date</TableHead>
-                  <TableHead>Change / Details</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleLogs.map((l) => (
-                  <TableRow key={l.id}>
-                    <TableCell className="text-xs text-slate-500 whitespace-nowrap">
-                      {new Date(l.createdAt).toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-xs font-medium">
-                      {l.actor ? `${l.actor.name} (${l.actor.role})` : "System"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="default" className="text-[11px] whitespace-nowrap">
-                        {l.action.replaceAll("_", " ")}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs">{l.targetUser?.name || "—"}</TableCell>
-                    <TableCell className="text-xs whitespace-nowrap">{l.date || "—"}</TableCell>
-                    <TableCell className="text-xs text-slate-600 max-w-md break-words">
-                      {formatActivityDetails(l.previousValue, l.newValue, l.reason)}
-                    </TableCell>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Actor</TableHead>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Target Guest</TableHead>
+                    <TableHead>Meal Date</TableHead>
+                    <TableHead>Change / Details</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {logs.map((l) => (
+                    <TableRow key={l.id}>
+                      <TableCell className="text-xs text-slate-500 whitespace-nowrap">
+                        {new Date(l.createdAt).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-xs font-medium">
+                        {l.actor ? `${l.actor.name} (${l.actor.role})` : "System"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="default" className="text-[11px] whitespace-nowrap">
+                          {l.action.replaceAll("_", " ")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs">{l.targetUser?.name || "—"}</TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">{l.date || "—"}</TableCell>
+                      <TableCell className="text-xs text-slate-600 max-w-md break-words">
+                        {formatActivityDetails(l.previousValue, l.newValue, l.reason)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <TablePagination
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={total}
+                onPageChange={(nextPage) => setFilter("page", nextPage)}
+                disabled={loading}
+              />
+            </>
           )}
         </CardContent>
       </Card>
