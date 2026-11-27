@@ -2,7 +2,6 @@
 
 import React, { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { UtensilsCrossed } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
@@ -149,10 +148,12 @@ function AcceptInviteForm() {
 export default function AcceptInvitePage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 px-4 py-12">
-      <div className="flex items-center gap-2 mb-6">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
-          <UtensilsCrossed className="h-5 w-5" />
-        </div>
+      <div className="flex items-center gap-2.5 mb-6">
+        <img
+          src="/logo.jpg"
+          alt="Office Meal Manager"
+          className="h-11 w-11 rounded-xl object-contain bg-white border border-slate-200 p-0.5 shadow-xs"
+        />
         <span className="text-lg font-bold text-slate-900">Office Meal Management</span>
       </div>
       <Suspense fallback={<p className="text-sm text-slate-500">Loading...</p>}>

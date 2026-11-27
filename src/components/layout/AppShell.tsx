@@ -9,6 +9,7 @@ import {
   CalendarOff,
   Clock,
   CreditCard,
+  Download,
   FileBarChart,
   FileText,
   LayoutDashboard,
@@ -17,10 +18,10 @@ import {
   MailCheck,
   Menu,
   Settings,
+  Smartphone,
   Tag,
   User as UserIcon,
   Users,
-  UtensilsCrossed,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -113,9 +114,11 @@ export function AppShell({
   const sidebarContent = (
     <div className="flex h-full flex-col bg-white border-r border-slate-200">
       <div className="flex h-16 items-center gap-2.5 px-5 border-b border-slate-100">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-xs">
-          <UtensilsCrossed className="h-5 w-5" />
-        </div>
+        <img
+          src="/logo.jpg"
+          alt="Office Meal Manager"
+          className="h-9 w-9 rounded-xl object-contain bg-white border border-slate-200 shrink-0"
+        />
         <div className="min-w-0">
           <p className="text-sm font-semibold text-slate-900 truncate">Office Meal</p>
           <p className="text-[11px] font-medium text-slate-500">
@@ -152,8 +155,20 @@ export function AppShell({
         })}
       </nav>
 
-      <div className="border-t border-slate-100 p-3">
-        <div className="mb-2 rounded-lg bg-slate-50 px-3 py-2">
+      <div className="border-t border-slate-100 p-3 space-y-1.5">
+        <a
+          href="https://drive.google.com/file/d/1Toq8XOotWQ0B3gpgZwQqu7vqs5V-JgNq/view?usp=sharing"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex w-full items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100/80 transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <Smartphone className="h-4 w-4 shrink-0" />
+            Download Android App
+          </span>
+          <Download className="h-3.5 w-3.5 shrink-0" />
+        </a>
+        <div className="rounded-lg bg-slate-50 px-3 py-2">
           <p className="text-xs font-semibold text-slate-900 truncate">{user.name}</p>
           <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
         </div>
