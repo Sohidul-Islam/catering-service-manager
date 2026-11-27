@@ -1,10 +1,12 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   AlertCircle,
   CheckCircle2,
   Copy,
+  Eye,
   History,
   KeyRound,
   Mail,
@@ -452,7 +454,12 @@ export default function AdminGuestsPage() {
                 {guests.map((g) => (
                   <TableRow key={g.id}>
                     <TableCell>
-                      <p className="font-medium text-slate-900">{g.name}</p>
+                      <Link
+                        href={`/admin/guests/${g.id}`}
+                        className="font-medium text-slate-900 hover:text-blue-600 hover:underline"
+                      >
+                        {g.name}
+                      </Link>
                       <p className="text-xs text-slate-500">{g.email}</p>
                       {g.phone && <p className="text-xs text-slate-400">{g.phone}</p>}
                     </TableCell>
@@ -526,6 +533,11 @@ export default function AdminGuestsPage() {
                             <KeyRound className="h-3.5 w-3.5" /> Password
                           </Button>
                         )}
+                        <Link href={`/admin/guests/${g.id}`}>
+                          <Button size="sm" variant="outline">
+                            <Eye className="h-3.5 w-3.5" /> View Profile
+                          </Button>
+                        </Link>
                         <Button size="sm" variant="outline" onClick={() => openHistory(g.id)}>
                           <History className="h-3.5 w-3.5" /> History
                         </Button>

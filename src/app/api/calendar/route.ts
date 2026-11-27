@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
     const endDate = dates[dates.length - 1];
 
     const isAdmin = user.role === UserRole.ADMIN;
+    const guestIdParam = isAdmin ? url.searchParams.get("guestId")?.trim() || null : null;
 
     const [holidays, prices, records, pendingRequests, sentConfirmationLogs, allGuests] =
       await Promise.all([
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
         prisma.mealRecord.findMany({
           where: {
             date: { gte: startDate, lte: endDate },
-            ...(isAdmin ? {} : { userId: user.id }),
+            ...(isAdmin ? (guestIdParam ? { userId: guestIdParam } : {}) : { userId: user.id }),
           },
           include: {
             user: {
@@ -68,7 +69,7 @@ export async function GET(req: NextRequest) {
           where: {
             date: { gte: startDate, lte: endDate },
             status: AdjustmentStatus.PENDING,
-            ...(isAdmin ? {} : { userId: user.id }),
+            ...(isAdmin ? (guestIdParam ? { userId: guestIdParam } : {}) : { userId: user.id }),
           },
         }),
         isAdmin
@@ -77,6 +78,7 @@ export async function GET(req: NextRequest) {
                 emailType: "MEAL_CONFIRMATION",
                 status: "SENT",
                 mealDate: { gte: startDate, lte: endDate },
+                ...(guestIdParam ? { guestId: guestIdParam } : {}),
               },
               orderBy: { sentAt: "desc" },
               select: { guestId: true, mealDate: true, sentAt: true },
@@ -84,7 +86,10 @@ export async function GET(req: NextRequest) {
           : Promise.resolve([]),
         isAdmin
           ? prisma.user.findMany({
-              where: { role: UserRole.GUEST },
+              where: {
+                role: UserRole.GUEST,
+                ...(guestIdParam ? { id: guestIdParam } : {}),
+              },
               select: {
                 id: true,
                 name: true,
@@ -179,7 +184,7 @@ export async function GET(req: NextRequest) {
             ? confirmationSentMap.get(`${r.userId}::${r.date}`) ?? null
             : null,
         })),
-        myPendingRequest: isAdmin ? null : dayPending[0] ?? null,
+        myPendingRequest: !isAdmin || guestIdParam ? dayPending[0] ?? null : null,
       };
     });
 
@@ -187,7 +192,11 @@ export async function GET(req: NextRequest) {
       year,
       month,
       today: now.dateStr,
-      guestMealStartDate: isAdmin ? null : user.mealStartDate ?? null,
+      guestMealStartDate: isAdmin
+        ? guestIdParam
+          ? allGuests[0]?.mealStartDate ?? null
+          : null
+        : user.mealStartDate ?? null,
       ...(isAdmin ? { guests: allGuests } : {}),
       settings: {
         organizationName: settings.organizationName,

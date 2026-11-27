@@ -139,7 +139,17 @@ function getDayOfWeekUtc(dateStr: string): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
+export function MealCalendar({
+  mode,
+  guestId,
+  onMealUpdated,
+}: {
+  mode: "ADMIN" | "GUEST";
+  guestId?: string;
+  onMealUpdated?: () => void;
+}) {
+  const isSingleGuestAdmin = mode === "ADMIN" && Boolean(guestId);
+  const showSingleGuestCell = mode === "GUEST" || isSingleGuestAdmin;
   const calendarSchema = useMemo(() => {
     const nowDate = new Date();
     return {
@@ -201,17 +211,24 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [previewData, setPreviewData] = useState<EmailPreviewData | null>(null);
 
-  const cacheKey = `${mode}:${year}-${month}`;
+  const cacheKey = guestId
+    ? `${mode}:${guestId}:${year}-${month}`
+    : `${mode}:${year}-${month}`;
   const activeKeyRef = useRef(cacheKey);
+  const guestQuerySuffix = guestId ? `&guestId=${encodeURIComponent(guestId)}` : "";
 
   const prefetchMonth = useCallback(
     (targetYear: number, targetMonth: number) => {
-      const targetKey = `${mode}:${targetYear}-${targetMonth}`;
+      const targetKey = guestId
+        ? `${mode}:${guestId}:${targetYear}-${targetMonth}`
+        : `${mode}:${targetYear}-${targetMonth}`;
       const existing = getCachedCalendar<CalendarResponse>(targetKey);
       if (existing?.isFresh) return;
 
       void fetchCalendarDeduped(targetKey, async () => {
-        const res = await fetch(`/api/calendar?year=${targetYear}&month=${targetMonth}`);
+        const res = await fetch(
+          `/api/calendar?year=${targetYear}&month=${targetMonth}${guestQuerySuffix}`
+        );
         if (!res.ok) throw new Error("Prefetch failed");
         return (await res.json()) as CalendarResponse;
       })
@@ -222,12 +239,14 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
           // Ignore silent prefetch errors
         });
     },
-    [mode]
+    [mode, guestId, guestQuerySuffix]
   );
 
   const fetchCalendar = useCallback(
     async (silent = false, force = false) => {
-      const requestKey = `${mode}:${year}-${month}`;
+      const requestKey = guestId
+        ? `${mode}:${guestId}:${year}-${month}`
+        : `${mode}:${year}-${month}`;
       const cached = !force ? getCachedCalendar<CalendarResponse>(requestKey) : null;
 
       if (cached) {
@@ -250,7 +269,9 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
 
       try {
         const loadFromApi = async () => {
-          const res = await fetch(`/api/calendar?year=${year}&month=${month}`);
+          const res = await fetch(
+            `/api/calendar?year=${year}&month=${month}${guestQuerySuffix}`
+          );
           const json = await res.json();
           if (!res.ok) throw new Error(json.error || "Failed to load calendar");
           return json as CalendarResponse;
@@ -284,7 +305,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
         }
       }
     },
-    [mode, year, month, prefetchMonth]
+    [mode, guestId, guestQuerySuffix, year, month, prefetchMonth]
   );
 
   useEffect(() => {
@@ -487,11 +508,15 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
 
           if (selectedScope === "FOLLOWING_DATES") {
             invalidateCalendarCache();
+          } else if (guestId) {
+            invalidateCalendarCache(`ADMIN:${year}-${month}`);
+            invalidateCalendarCache(`GUEST:${year}-${month}`);
           }
           if (nextData) {
             setCachedCalendar(cacheKey, nextData);
           }
           invalidateDashboardCache();
+          onMealUpdated?.();
         }
       } catch (err) {
         if (latestSeqRef.current.get(key) === nextSeq) {
@@ -579,6 +604,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
       invalidateCalendarCache(cacheKey);
       invalidateDashboardCache();
       await fetchCalendar(true, true);
+      onMealUpdated?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Recalculation failed");
     } finally {
@@ -639,7 +665,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
     setGuestDraftQty(mode === "GUEST" ? (day.records[0]?.quantity ?? 0) : null);
     setConfirmGuestSaveOpen(false);
     setOverrideReason("");
-    setShowUnscheduledGuests(day.records.length === 0);
+    setShowUnscheduledGuests(isSingleGuestAdmin || day.records.length === 0);
     setGuestSearch("");
     setCopiedDaySummary(false);
     setLastAdjustment(null);
@@ -811,7 +837,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
       );
     }
 
-    if (mode === "GUEST") {
+    if (showSingleGuestCell) {
       const myQty = day.records[0]?.quantity ?? 0;
       if (data?.guestMealStartDate && day.date < data.guestMealStartDate) {
         if (myQty > 0) {
@@ -1059,9 +1085,9 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
                     )}
                     {(day.isWorkingDay ||
                       (mode === "ADMIN" && day.totalMeals > 0) ||
-                      (mode === "GUEST" && myQty > 0)) && (
+                      (showSingleGuestCell && myQty > 0)) && (
                       <>
-                        {mode === "GUEST" &&
+                        {showSingleGuestCell &&
                         data?.guestMealStartDate &&
                         day.date < data.guestMealStartDate ? (
                           myQty > 0 ? (
@@ -1078,18 +1104,18 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
                           )
                         ) : (
                           <p className="text-xs font-semibold text-slate-800">
-                            {mode === "ADMIN"
+                            {mode === "ADMIN" && !isSingleGuestAdmin
                               ? `${day.totalMeals} meal${day.totalMeals === 1 ? "" : "s"} (${day.activeGuestsCount} guests)`
                               : `${myQty} meal${myQty === 1 ? "" : "s"}`}
                           </p>
                         )}
-                        {mode === "GUEST" &&
+                        {showSingleGuestCell &&
                           day.records[0]?.overrideScope === "SINGLE_DATE" && (
                             <p className="text-[10px] text-blue-600 font-medium">
                               Modified for this day
                             </p>
                           )}
-                        {mode === "GUEST" &&
+                        {showSingleGuestCell &&
                           day.records[0]?.source === "FOLLOWING_RULE" && (
                             <p className="text-[10px] text-violet-600 font-medium">
                               Following rule
@@ -1125,7 +1151,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
             const dow = WEEKDAYS[getDayOfWeekUtc(day.date)];
             const myQty = day.records[0]?.quantity ?? 0;
             const isBeforeGuestStart =
-              mode === "GUEST" &&
+              showSingleGuestCell &&
               Boolean(data?.guestMealStartDate) &&
               day.date < data!.guestMealStartDate!;
             return (
@@ -1146,10 +1172,12 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
                     <span>Price: {formatBDT(day.effectivePricePoisha)}</span>
-                    {mode === "ADMIN" && (day.isWorkingDay || day.totalMeals > 0) && (
-                      <span>• {day.totalMeals} meals</span>
-                    )}
-                    {mode === "GUEST" &&
+                    {mode === "ADMIN" &&
+                      !isSingleGuestAdmin &&
+                      (day.isWorkingDay || day.totalMeals > 0) && (
+                        <span>• {day.totalMeals} meals</span>
+                      )}
+                    {showSingleGuestCell &&
                       (isBeforeGuestStart ? (
                         myQty > 0 ? (
                           <span>• {myQty} meal(s)</span>

@@ -4,9 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/services/auth.service";
 import { logActivity } from "@/services/activity.service";
 import { resyncGuestDefaultMeals, getSettings } from "@/services/schedule.service";
+import { getGuestDashboardData } from "@/services/guest-dashboard.service";
 import { getNowInTimezone } from "@/lib/timezone";
 import { handleApiError } from "@/lib/api-utils";
-import { MealPreference, UserStatus } from "@prisma/client";
+import { MealPreference, UserRole, UserStatus } from "@prisma/client";
 
 const updateGuestSchema = z.object({
   name: z.string().min(1).max(120).optional(),
@@ -30,8 +31,26 @@ export async function GET(
     const { id } = await context.params;
     const guest = await prisma.user.findUnique({
       where: { id },
-      include: {
-        invitation: true,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        mealPreference: true,
+        defaultMealQty: true,
+        mealStartDate: true,
+        joinedAt: true,
+        createdAt: true,
+        invitation: {
+          select: {
+            token: true,
+            expiresAt: true,
+            acceptedAt: true,
+            createdAt: true,
+          },
+        },
         mealRecords: { orderBy: { date: "desc" }, take: 60 },
         mealRuleHistories: {
           orderBy: { createdAt: "desc" },
@@ -46,10 +65,25 @@ export async function GET(
         },
       },
     });
-    if (!guest) {
+    if (!guest || guest.role !== UserRole.GUEST) {
       return NextResponse.json({ error: "Guest not found" }, { status: 404 });
     }
-    return NextResponse.json({ guest });
+
+    const [dashboard, activityLogs] = await Promise.all([
+      getGuestDashboardData(id),
+      prisma.activityLog.findMany({
+        where: {
+          OR: [{ targetUserId: id }, { actorId: id }],
+        },
+        include: {
+          actor: { select: { name: true, role: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      }),
+    ]);
+
+    return NextResponse.json({ guest, dashboard, activityLogs });
   } catch (error) {
     return handleApiError(error);
   }

@@ -1,13 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/services/auth.service";
-import { ensureMonthSchedule, getSettings, isWorkingDay } from "@/services/schedule.service";
-import {
-  getMonthDateRange,
-  getNowInTimezone,
-  getTomorrowDateStr,
-  isPastMealDeadline,
-} from "@/lib/timezone";
+import { ensureMonthSchedule, getSettings } from "@/services/schedule.service";
+import { getGuestDashboardData } from "@/services/guest-dashboard.service";
+import { getMonthDateRange, getNowInTimezone, getTomorrowDateStr } from "@/lib/timezone";
 import { handleApiError } from "@/lib/api-utils";
 import { AdjustmentStatus, UserRole, UserStatus } from "@prisma/client";
 
@@ -137,84 +133,10 @@ export async function GET() {
     }
 
     // GUEST dashboard
-    const [
-      monthRecords,
-      allInvoices,
-      recentPayments,
-      holidays,
-      tomorrowPendingReq,
-    ] = await Promise.all([
-      prisma.mealRecord.findMany({
-        where: { userId: user.id, date: { gte: startDate, lte: endDate } },
-        orderBy: { date: "asc" },
-      }),
-      prisma.invoice.findMany({
-        where: { userId: user.id },
-        orderBy: [{ year: "desc" }, { month: "desc" }],
-      }),
-      prisma.payment.findMany({
-        where: { userId: user.id },
-        orderBy: { paidAt: "desc" },
-        take: 5,
-        include: { invoice: { select: { invoiceNumber: true } } },
-      }),
-      prisma.holiday.findMany({
-        where: { date: { gte: startDate, lte: endDate } },
-      }),
-      prisma.mealAdjustmentRequest.findFirst({
-        where: { userId: user.id, date: tomorrow, status: AdjustmentStatus.PENDING },
-      }),
-    ]);
-
-    const holidayMap = new Map(holidays.map((h) => [h.date, h]));
-    const todayRec = monthRecords.find((r) => r.date === now.dateStr) ?? null;
-    const tomorrowRec = monthRecords.find((r) => r.date === tomorrow) ?? null;
-    const tomorrowLocked = isPastMealDeadline(
-      tomorrow,
-      settings.deadlineHour,
-      settings.deadlineMinute,
-      settings.timezone
-    );
-    const tomorrowWorking = isWorkingDay(tomorrow, settings, holidayMap);
-
-    const monthlyMeals = monthRecords.reduce((s, r) => s + r.quantity, 0);
-    const monthlyBillPoisha = monthRecords.reduce(
-      (s, r) => s + r.quantity * r.unitPricePoisha,
-      0
-    );
-
-    const totalBilledAll = allInvoices.reduce((s, i) => s + i.totalAmountPoisha, 0);
-    const totalPaidAll = allInvoices.reduce((s, i) => s + i.paidAmountPoisha, 0);
-    const remainingDuesPoisha = Math.max(0, totalBilledAll - totalPaidAll);
-
-    const upcomingMeals = monthRecords
-      .filter((r) => r.date >= now.dateStr)
-      .slice(0, 7);
-
+    const guestDashboard = await getGuestDashboardData(user.id);
     return NextResponse.json({
       role: "GUEST",
-      year: now.year,
-      month: now.month,
-      today: now.dateStr,
-      tomorrow,
-      settings: {
-        timezone: settings.timezone,
-        deadlineHour: settings.deadlineHour,
-        deadlineMinute: settings.deadlineMinute,
-        maxMealQty: settings.maxMealQty,
-      },
-      todayMeal: todayRec,
-      tomorrowMeal: tomorrowRec,
-      tomorrowLocked,
-      tomorrowWorking,
-      tomorrowPendingRequest: tomorrowPendingReq,
-      monthlyMeals,
-      monthlyBillPoisha,
-      totalPaidAllPoisha: totalPaidAll,
-      remainingDuesPoisha,
-      upcomingMeals,
-      latestInvoices: allInvoices.slice(0, 3),
-      recentPayments,
+      ...guestDashboard,
     });
   } catch (error) {
     return handleApiError(error);
