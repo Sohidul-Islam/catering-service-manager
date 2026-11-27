@@ -60,6 +60,7 @@ enum EmailType {
   MEAL_ADJUSTMENT
   INVOICE
   PAYMENT_CONFIRMATION
+  PASSWORD_RESET
 }
 
 enum EmailStatus {
@@ -110,8 +111,10 @@ model User {
   guestEmailLogs         EmailLog[]              @relation("GuestEmailLogs")
   sentEmailLogs          EmailLog[]              @relation("SenderEmailLogs")
   createdPublicTokens    PublicInvoiceToken[]
-  mealRuleHistories      MealRuleHistory[]       @relation("GuestMealRules")
-  changedMealRules       MealRuleHistory[]       @relation("ChangerMealRules")
+  mealRuleHistories          MealRuleHistory[]       @relation("GuestMealRules")
+  changedMealRules           MealRuleHistory[]       @relation("ChangerMealRules")
+  passwordResetTokens        PasswordResetToken[]    @relation("GuestPasswordResetTokens")
+  createdPasswordResetTokens PasswordResetToken[]    @relation("CreatedPasswordResetTokens")
 }
 
 model Invitation {
@@ -383,4 +386,20 @@ model VendorShareToken {
   createdAt   DateTime  @default(now())
 
   @@index([year, month])
+}
+
+model PasswordResetToken {
+  id          String    @id @default(cuid())
+  userId      String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  user      User  @relation("GuestPasswordResetTokens", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("CreatedPasswordResetTokens", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([expiresAt])
 }

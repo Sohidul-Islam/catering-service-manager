@@ -46,6 +46,7 @@ export default function AdminEmailLogsPage() {
           "MEAL_ADJUSTMENT",
           "INVOICE",
           "PAYMENT_CONFIRMATION",
+          "PASSWORD_RESET",
         ] as const,
         ""
       ),
@@ -104,6 +105,7 @@ export default function AdminEmailLogsPage() {
                   | "MEAL_ADJUSTMENT"
                   | "INVOICE"
                   | "PAYMENT_CONFIRMATION"
+                  | "PASSWORD_RESET"
               )
             }
           >
@@ -113,6 +115,7 @@ export default function AdminEmailLogsPage() {
             <option value="MEAL_ADJUSTMENT">Meal Adjustment</option>
             <option value="INVOICE">Invoice</option>
             <option value="PAYMENT_CONFIRMATION">Payment Confirmation</option>
+            <option value="PASSWORD_RESET">Password Reset</option>
           </Select>
           <Select
             className="w-36"

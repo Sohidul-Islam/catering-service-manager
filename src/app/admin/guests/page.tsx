@@ -1,14 +1,32 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, Copy, History, Mail, Plus, RefreshCw, UserCheck, Users } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Copy,
+  History,
+  KeyRound,
+  Mail,
+  Plus,
+  RefreshCw,
+  Send,
+  UserCheck,
+  Users,
+} from "lucide-react";
 import { TableSkeleton } from "@/components/ui/loading-state";
 import { parseBulkGuestInput, type InvalidBulkGuest } from "@/lib/guest-bulk-parser";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog } from "@/components/ui/dialog";
+import { ConfirmDialog, Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
+import {
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_REQUIREMENTS_HINT,
+  validatePasswordStrength,
+} from "@/lib/password-validation";
 import {
   Table,
   TableBody,
@@ -57,6 +75,13 @@ export default function AdminGuestsPage() {
     failed: InvalidBulkGuest[];
   } | null>(null);
   const [editGuest, setEditGuest] = useState<GuestRow | null>(null);
+  const [passwordGuest, setPasswordGuest] = useState<GuestRow | null>(null);
+  const [manualPassword, setManualPassword] = useState("");
+  const [manualConfirmPassword, setManualConfirmPassword] = useState("");
+  const [manualPasswordError, setManualPasswordError] = useState<string | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [resetLinkGuest, setResetLinkGuest] = useState<GuestRow | null>(null);
+  const [sendingResetLink, setSendingResetLink] = useState(false);
   const [createdInviteLink, setCreatedInviteLink] = useState<string | null>(null);
   const [createdInviteEmailStatus, setCreatedInviteEmailStatus] = useState<{
     email: string;
@@ -281,6 +306,78 @@ export default function AdminGuestsPage() {
     toast.success("Invite link copied");
   }
 
+  function openManualPasswordModal(guest: GuestRow) {
+    setPasswordGuest(guest);
+    setManualPassword("");
+    setManualConfirmPassword("");
+    setManualPasswordError(null);
+  }
+
+  async function handleManualPasswordSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!passwordGuest) return;
+    setManualPasswordError(null);
+
+    const strengthError = validatePasswordStrength(manualPassword);
+    if (strengthError) {
+      setManualPasswordError(strengthError);
+      return;
+    }
+    if (manualPassword !== manualConfirmPassword) {
+      setManualPasswordError("Passwords do not match.");
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      const res = await fetch(`/api/guests/${passwordGuest.id}/password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          password: manualPassword,
+          confirmPassword: manualConfirmPassword,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to update guest password");
+      toast.success(json.message || `Password updated for ${passwordGuest.name}`);
+      setPasswordGuest(null);
+      setManualPassword("");
+      setManualConfirmPassword("");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update password";
+      setManualPasswordError(msg);
+      toast.error(msg);
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
+  async function handleConfirmSendResetLink() {
+    if (!resetLinkGuest) return;
+    setSendingResetLink(true);
+    try {
+      const res = await fetch(`/api/guests/${resetLinkGuest.id}/password-reset`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to send password reset link");
+
+      if (json.emailSent) {
+        toast.success(`Password reset link sent to ${resetLinkGuest.email}`);
+      } else {
+        toast.error(
+          `Could not send reset email to ${resetLinkGuest.email}: ${json.emailError || "SMTP error"}`
+        );
+      }
+      setResetLinkGuest(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to send password reset link");
+    } finally {
+      setSendingResetLink(false);
+    }
+  }
+
   async function openHistory(guestId: string) {
     setHistoryLoading(true);
     try {
@@ -385,7 +482,7 @@ export default function AdminGuestsPage() {
                       {formatBDT(g.outstandingPoisha)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="inline-flex items-center gap-1.5">
+                      <div className="inline-flex flex-wrap justify-end items-center gap-1.5">
                         {g.status === "INVITED" && g.invitation?.token && (
                           <Button
                             size="sm"
@@ -407,6 +504,26 @@ export default function AdminGuestsPage() {
                             title="Regenerate invite link"
                           >
                             <RefreshCw className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {g.status === "ACTIVE" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setResetLinkGuest(g)}
+                            title="Send password reset link via email"
+                          >
+                            <Send className="h-3.5 w-3.5" /> Reset Link
+                          </Button>
+                        )}
+                        {g.status !== "INVITED" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openManualPasswordModal(g)}
+                            title="Change guest password manually"
+                          >
+                            <KeyRound className="h-3.5 w-3.5" /> Password
                           </Button>
                         )}
                         <Button size="sm" variant="outline" onClick={() => openHistory(g.id)}>
@@ -999,6 +1116,104 @@ export default function AdminGuestsPage() {
           </div>
         ) : null}
       </Dialog>
+
+      {/* Admin Manual Password Change Modal */}
+      <Dialog
+        open={Boolean(passwordGuest)}
+        onClose={() => {
+          if (!changingPassword) setPasswordGuest(null);
+        }}
+        title="Change Guest Password"
+        description="Set a new password for a guest who needs assistance signing in."
+      >
+        {passwordGuest && (
+          <form onSubmit={handleManualPasswordSubmit} className="space-y-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-900 truncate">
+                  {passwordGuest.name}
+                </p>
+                <p className="text-xs text-slate-500 truncate">{passwordGuest.email}</p>
+              </div>
+              <Badge variant={passwordGuest.status === "ACTIVE" ? "success" : "muted"}>
+                {passwordGuest.status}
+              </Badge>
+            </div>
+
+            {manualPasswordError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {manualPasswordError}
+              </div>
+            )}
+
+            <div>
+              <Label htmlFor="admin-guest-pass">New Password</Label>
+              <PasswordInput
+                id="admin-guest-pass"
+                required
+                minLength={PASSWORD_MIN_LENGTH}
+                value={manualPassword}
+                onChange={(e) => {
+                  setManualPassword(e.target.value);
+                  if (manualPasswordError) setManualPasswordError(null);
+                }}
+                placeholder="Enter new password"
+                className="mt-1"
+                autoFocus
+              />
+              <p className="mt-1 text-[11px] text-slate-500">{PASSWORD_REQUIREMENTS_HINT}</p>
+            </div>
+
+            <div>
+              <Label htmlFor="admin-guest-pass-confirm">Confirm New Password</Label>
+              <PasswordInput
+                id="admin-guest-pass-confirm"
+                required
+                minLength={PASSWORD_MIN_LENGTH}
+                value={manualConfirmPassword}
+                onChange={(e) => {
+                  setManualConfirmPassword(e.target.value);
+                  if (manualPasswordError) setManualPasswordError(null);
+                }}
+                placeholder="Re-enter new password"
+                className="mt-1"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={changingPassword}
+                onClick={() => setPasswordGuest(null)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={changingPassword}>
+                <KeyRound className="h-4 w-4" />
+                {changingPassword ? "Updating..." : "Update Password"}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Dialog>
+
+      {/* Admin Send Password Reset Link Confirmation */}
+      <ConfirmDialog
+        open={Boolean(resetLinkGuest)}
+        onClose={() => {
+          if (!sendingResetLink) setResetLinkGuest(null);
+        }}
+        onConfirm={handleConfirmSendResetLink}
+        title="Send Password Reset Link"
+        description={
+          resetLinkGuest
+            ? `Send a single-use password reset link (valid for 60 minutes) to ${resetLinkGuest.name} (${resetLinkGuest.email})? Any previously unused reset links for this guest will be invalidated.`
+            : ""
+        }
+        confirmLabel="Send Reset Link"
+        loading={sendingResetLink}
+      />
     </div>
   );
 }

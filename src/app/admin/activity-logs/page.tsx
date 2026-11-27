@@ -46,6 +46,9 @@ export default function AdminActivityLogsPage() {
           "GENERATE_INVOICE",
           "SET_DATE_MEAL_PRICE",
           "UPSERT_HOLIDAY",
+          "PASSWORD_RESET_COMPLETED",
+          "ADMIN_SEND_PASSWORD_RESET",
+          "ADMIN_CHANGE_GUEST_PASSWORD",
         ] as const,
         ""
       ),
@@ -93,15 +96,18 @@ export default function AdminActivityLogsPage() {
               setFilter(
                 "action",
                 e.target.value as
-                  | ""
-                  | "GUEST_UPDATE_MEAL"
-                  | "ADMIN_UPDATE_MEAL"
-                  | "ADMIN_OVERRIDE_LOCKED_MEAL"
-                  | "APPROVE_ADJUSTMENT_REQUEST"
-                  | "RECORD_PAYMENT"
-                  | "GENERATE_INVOICE"
-                  | "SET_DATE_MEAL_PRICE"
-                  | "UPSERT_HOLIDAY"
+                | ""
+                | "GUEST_UPDATE_MEAL"
+                | "ADMIN_UPDATE_MEAL"
+                | "ADMIN_OVERRIDE_LOCKED_MEAL"
+                | "APPROVE_ADJUSTMENT_REQUEST"
+                | "RECORD_PAYMENT"
+                | "GENERATE_INVOICE"
+                | "SET_DATE_MEAL_PRICE"
+                | "UPSERT_HOLIDAY"
+                | "PASSWORD_RESET_COMPLETED"
+                | "ADMIN_SEND_PASSWORD_RESET"
+                | "ADMIN_CHANGE_GUEST_PASSWORD"
               )
             }
           >
@@ -114,6 +120,9 @@ export default function AdminActivityLogsPage() {
             <option value="GENERATE_INVOICE">Generate Invoice</option>
             <option value="SET_DATE_MEAL_PRICE">Date Price Override</option>
             <option value="UPSERT_HOLIDAY">Holiday Change</option>
+            <option value="PASSWORD_RESET_COMPLETED">Password Reset Completed</option>
+            <option value="ADMIN_SEND_PASSWORD_RESET">Admin Sent Password Reset</option>
+            <option value="ADMIN_CHANGE_GUEST_PASSWORD">Admin Changed Guest Password</option>
           </Select>
           {hasActiveFilters && (
             <Button size="sm" variant="ghost" onClick={resetFilters}>

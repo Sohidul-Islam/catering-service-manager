@@ -9,6 +9,7 @@ import {
 import { renderInvoiceEmail } from "@/lib/email/templates/invoice";
 import { renderPaymentConfirmationEmail } from "@/lib/email/templates/payment-confirmation";
 import { renderGuestInvitationEmail } from "@/lib/email/templates/guest-invitation";
+import { renderPasswordResetEmail } from "@/lib/email/templates/password-reset";
 import { getSettings } from "./schedule.service";
 import { buildPublicInvoiceUrl, generatePublicInvoiceToken, getActivePublicToken } from "./public-invoice.service";
 import { EmailType } from "@prisma/client";
@@ -503,5 +504,33 @@ export async function sendAdjustmentDecisionEmail(params: {
     guestId: params.guestId,
     mealDate: params.date,
     sentById: params.sentById,
+  });
+}
+
+export async function sendPasswordResetEmail(params: {
+  guestId: string;
+  guestName: string;
+  guestEmail: string;
+  resetUrl: string;
+  sentById?: string | null;
+  initiatedByAdmin?: boolean;
+}) {
+  const settings = await getSettings();
+  const rendered = renderPasswordResetEmail({
+    guestName: params.guestName,
+    organizationName: settings.organizationName || "Office Meal Management",
+    resetUrl: params.resetUrl,
+    expiresInMinutes: 60,
+    initiatedByAdmin: Boolean(params.initiatedByAdmin),
+  });
+
+  return sendAndLogEmail({
+    emailType: EmailType.PASSWORD_RESET,
+    recipientEmail: params.guestEmail,
+    subject: rendered.subject,
+    html: rendered.html,
+    text: rendered.text,
+    guestId: params.guestId,
+    sentById: params.sentById ?? null,
   });
 }
