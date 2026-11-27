@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { EmailPreviewData, EmailPreviewModal } from "@/components/email/EmailPreviewModal";
+import { VendorShareLinkCard } from "@/components/vendor/VendorShareLinkCard";
 import { formatBDT } from "@/lib/money";
 import { copyTextToClipboard, formatMealSummaryText } from "@/lib/meal-summary";
 import { addDays } from "@/lib/timezone";
@@ -208,6 +209,7 @@ export default function AdminMealConfirmationsPage() {
 
   return (
     <div className="space-y-4">
+      <VendorShareLinkCard />
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-900">Daily Meal Confirmations</h2>

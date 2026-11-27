@@ -372,3 +372,15 @@ model MealRuleHistory {
 
   @@index([userId, effectiveFrom])
 }
+
+model VendorShareToken {
+  id          String    @id @default(cuid())
+  token       String    @unique
+  year        Int
+  month       Int
+  createdById String?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([year, month])
+}

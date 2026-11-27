@@ -32,6 +32,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
 import { MealSummaryPanel } from "@/components/summary/MealSummaryPanel";
+import { VendorShareLinkCard } from "@/components/vendor/VendorShareLinkCard";
 import {
   Table,
   TableBody,
@@ -205,6 +206,9 @@ export default function AdminDashboardPage() {
           </Link>
         </div>
       </div>
+
+      {/* Vendor Shareable Link */}
+      <VendorShareLinkCard />
 
       {/* KPI Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
