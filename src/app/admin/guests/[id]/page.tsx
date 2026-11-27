@@ -19,16 +19,50 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageLoader } from "@/components/ui/loading-state";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatBDT } from "@/lib/money";
 import { toast } from "sonner";
+
+function formatActivityValue(raw: string | null): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      const hiddenKeys = new Set(["messageId", "invoiceId"]);
+      const entries = Object.entries(parsed).filter(
+        ([k, v]) => !hiddenKeys.has(k) && v !== undefined && v !== null && v !== ""
+      );
+      if (entries.length > 0) {
+        return entries
+          .map(([k, v]) => {
+            const label = k
+              .replace(/([A-Z])/g, " $1")
+              .replace(/^./, (c) => c.toUpperCase());
+            return `${label}: ${String(v)}`;
+          })
+          .join(" • ");
+      }
+    } catch {
+      // Fallback to raw string if not valid JSON
+    }
+  }
+  return raw;
+}
+
+function formatActivityDetails(
+  previousValue: string | null,
+  newValue: string | null,
+  reason: string | null
+): string {
+  const prevFormatted = formatActivityValue(previousValue);
+  const nextFormatted = formatActivityValue(newValue);
+  const transition =
+    prevFormatted && nextFormatted
+      ? `${prevFormatted} → ${nextFormatted}`
+      : nextFormatted || prevFormatted;
+  if (transition && reason) return `${transition} (${reason})`;
+  return transition || reason || "—";
+}
 
 interface GuestProfileResponse {
   guest: {
@@ -485,7 +519,7 @@ export default function AdminGuestProfilePage() {
             {guest.mealRuleHistories.length === 0 ? (
               <p className="text-sm text-slate-500 py-4 text-center">No rule changes recorded.</p>
             ) : (
-              <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
+              <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
                 {guest.mealRuleHistories.map((rule) => (
                   <div
                     key={rule.id}
@@ -523,39 +557,34 @@ export default function AdminGuestProfilePage() {
             {activityLogs.length === 0 ? (
               <p className="text-sm text-slate-500 py-4 text-center">No activity recorded yet.</p>
             ) : (
-              <div className="max-h-72 overflow-y-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Time</TableHead>
-                      <TableHead>Action</TableHead>
-                      <TableHead>By</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Details</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {activityLogs.map((l) => (
-                      <TableRow key={l.id}>
-                        <TableCell className="text-xs text-slate-500 whitespace-nowrap">
-                          {new Date(l.createdAt).toLocaleString()}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="default" className="text-[10px]">
-                            {l.action.replaceAll("_", " ")}
+              <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
+                {activityLogs.map((l) => (
+                  <div key={l.id} className="px-3 py-2.5 text-xs space-y-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant="default" className="text-[10px] whitespace-nowrap">
+                          {l.action.replaceAll("_", " ")}
+                        </Badge>
+                        {l.date && (
+                          <Badge variant="muted" className="text-[10px] whitespace-nowrap">
+                            Meal: {l.date}
                           </Badge>
-                        </TableCell>
-                        <TableCell className="text-xs">{l.actor?.name || "System"}</TableCell>
-                        <TableCell className="text-xs whitespace-nowrap">{l.date || "—"}</TableCell>
-                        <TableCell className="text-xs text-slate-600 max-w-xs truncate">
-                          {l.previousValue ? `${l.previousValue} → ` : ""}
-                          {l.newValue || ""}
-                          {l.reason ? ` (${l.reason})` : ""}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-slate-400 whitespace-nowrap">
+                        {new Date(l.createdAt).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <p className="text-slate-700 break-words">
+                        {formatActivityDetails(l.previousValue, l.newValue, l.reason)}
+                      </p>
+                      <span className="text-[11px] text-slate-500 shrink-0">
+                        By {l.actor?.name || "System"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>
