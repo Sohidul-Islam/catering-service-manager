@@ -16,8 +16,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Office Meal Management System",
-  description: "Google Calendar-inspired office lunch scheduling, billing, and payment management.",
+  title: "Office Meal Manager",
+  description:
+    "Manage daily office lunch schedules, guest meal preferences, monthly invoices, and payments in one place.",
+  icons: {
+    icon: "/logo.jpg",
+    apple: "/logo.jpg",
+  },
 };
 
 export default function RootLayout({
