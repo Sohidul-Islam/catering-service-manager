@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
+import { TableSkeleton } from "@/components/ui/loading-state";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -107,7 +108,7 @@ export default function AdminAdjustmentRequestsPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Loading requests...</p>
+            <TableSkeleton rows={4} label="Loading adjustment requests..." />
           ) : requests.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">No adjustment requests found.</p>
           ) : (

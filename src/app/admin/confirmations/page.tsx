@@ -17,6 +17,7 @@ import {
 import { EmailPreviewData, EmailPreviewModal } from "@/components/email/EmailPreviewModal";
 import { VendorShareLinkCard } from "@/components/vendor/VendorShareLinkCard";
 import { formatBDT } from "@/lib/money";
+import { TableSkeleton } from "@/components/ui/loading-state";
 import { copyTextToClipboard, formatMealSummaryText } from "@/lib/meal-summary";
 import { addDays } from "@/lib/timezone";
 import { toast } from "sonner";
@@ -295,7 +296,7 @@ export default function AdminMealConfirmationsPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Loading meal records...</p>
+            <TableSkeleton rows={5} label="Loading meal records..." />
           ) : rows.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">
               No meal records found for this date.

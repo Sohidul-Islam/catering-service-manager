@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Calendar, RefreshCw, Utensils } from "lucide-react";
+import { PageLoader } from "@/components/ui/loading-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -97,7 +98,10 @@ export default function PublicVendorMealsPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
-        <p className="text-sm text-slate-500">Loading live meal counts...</p>
+        <PageLoader
+          label="Loading live meal counts..."
+          description="Fetching today, tomorrow, and monthly totals"
+        />
       </div>
     );
   }

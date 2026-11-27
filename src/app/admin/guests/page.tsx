@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, Copy, History, Mail, Plus, RefreshCw, UserCheck, Users } from "lucide-react";
+import { TableSkeleton } from "@/components/ui/loading-state";
 import { parseBulkGuestInput, type InvalidBulkGuest } from "@/lib/guest-bulk-parser";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -334,7 +335,7 @@ export default function AdminGuestsPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Loading guests...</p>
+            <TableSkeleton rows={5} label="Loading guests..." />
           ) : guests.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">No guests yet.</p>
           ) : (

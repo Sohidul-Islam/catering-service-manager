@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/table";
 import { formatBDT } from "@/lib/money";
 import { MealSummaryPanel } from "@/components/summary/MealSummaryPanel";
+import { PageLoader } from "@/components/ui/loading-state";
 import { toast } from "sonner";
 
 interface ReportData {
@@ -206,7 +207,10 @@ export default function AdminReportsPage() {
       </Card>
 
       {loading || !data ? (
-        <p className="text-sm text-slate-500 py-8 text-center">Loading reports...</p>
+        <PageLoader
+          label="Loading meal & financial reports..."
+          description="Aggregating monthly totals and guest history"
+        />
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">

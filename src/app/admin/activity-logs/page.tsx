@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
+import { TableSkeleton } from "@/components/ui/loading-state";
 
 interface LogRow {
   id: string;
@@ -78,7 +79,7 @@ export default function AdminActivityLogsPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Loading logs...</p>
+            <TableSkeleton rows={5} label="Loading activity logs..." />
           ) : logs.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">No logs recorded yet.</p>
           ) : (

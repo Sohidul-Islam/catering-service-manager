@@ -18,6 +18,7 @@ import {
 import { EmailPreviewData, EmailPreviewModal } from "@/components/email/EmailPreviewModal";
 import { formatBDT, poishaToBdt } from "@/lib/money";
 import { toast } from "sonner";
+import { TableSkeleton } from "@/components/ui/loading-state";
 
 interface PaymentRow {
   id: string;
@@ -230,7 +231,7 @@ export default function AdminPaymentsPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Loading payments...</p>
+            <TableSkeleton rows={5} label="Loading payments..." />
           ) : payments.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">No payments recorded yet.</p>
           ) : (

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface DialogProps {
@@ -102,13 +102,14 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={loading}
             className={cn(
-              "inline-flex h-9 items-center justify-center rounded-lg px-4 text-sm font-medium text-white disabled:opacity-50 cursor-pointer",
+              "inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-medium text-white disabled:opacity-50 cursor-pointer",
               variant === "destructive"
                 ? "bg-red-600 hover:bg-red-700"
                 : "bg-blue-600 hover:bg-blue-700"
             )}
           >
-            {loading ? "Processing..." : confirmLabel}
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+            {loading ? "Saving..." : confirmLabel}
           </button>
         </div>
       </div>

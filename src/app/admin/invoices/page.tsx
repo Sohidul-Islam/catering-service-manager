@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/table";
 import { EmailPreviewData, EmailPreviewModal } from "@/components/email/EmailPreviewModal";
 import { formatBDT } from "@/lib/money";
+import { TableSkeleton } from "@/components/ui/loading-state";
 import { invalidateDashboardCache } from "@/lib/dashboard-cache";
 import { toast } from "sonner";
 
@@ -275,7 +276,7 @@ export default function AdminInvoicesPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Loading invoices...</p>
+            <TableSkeleton rows={5} label="Loading monthly invoices..." />
           ) : invoices.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">
               No invoices for this month yet. Click &ldquo;Generate Invoices&rdquo; above.

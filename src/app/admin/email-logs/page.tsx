@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
+import { TableSkeleton } from "@/components/ui/loading-state";
 
 interface EmailLogRow {
   id: string;
@@ -95,7 +96,7 @@ export default function AdminEmailLogsPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Loading email logs...</p>
+            <TableSkeleton rows={5} label="Loading email logs..." />
           ) : logs.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">No emails sent yet.</p>
           ) : (

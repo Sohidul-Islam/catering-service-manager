@@ -21,7 +21,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Dialog } from "@/components/ui/dialog";
+import { ConfirmDialog, Dialog } from "@/components/ui/dialog";
+import { CalendarSkeleton, Spinner } from "@/components/ui/loading-state";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import {
   Table,
@@ -155,6 +156,9 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
 
   // Admin override reason & adjustment email / invoice recalculation prompts
   const [applyScope, setApplyScope] = useState<"SINGLE_DATE" | "FOLLOWING_DATES">("SINGLE_DATE");
+  const [guestDraftQty, setGuestDraftQty] = useState<number | null>(null);
+  const [confirmGuestSaveOpen, setConfirmGuestSaveOpen] = useState(false);
+  const [savingGuestMeal, setSavingGuestMeal] = useState(false);
   const [overrideReason, setOverrideReason] = useState("");
   const [showUnscheduledGuests, setShowUnscheduledGuests] = useState(false);
   const [guestSearch, setGuestSearch] = useState("");
@@ -620,6 +624,8 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
   function openDayModal(day: CalendarDay) {
     setSelectedDay(day);
     setApplyScope("SINGLE_DATE");
+    setGuestDraftQty(mode === "GUEST" ? (day.records[0]?.quantity ?? 0) : null);
+    setConfirmGuestSaveOpen(false);
     setOverrideReason("");
     setShowUnscheduledGuests(day.records.length === 0);
     setGuestSearch("");
@@ -629,6 +635,95 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
     const currentQty = day.records[0]?.quantity ?? 0;
     setLateQty(currentQty > 0 ? 0 : 1);
     setLateReason("");
+  }
+
+  async function handleConfirmGuestSave() {
+    if (!selectedDay || guestDraftQty === null) return;
+    const dateStr = selectedDay.date;
+    const nextQty = Math.max(0, guestDraftQty);
+    const selectedScope = applyScope;
+
+    setSavingGuestMeal(true);
+    try {
+      const res = await fetch("/api/meals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: dateStr,
+          quantity: nextQty,
+          scope: selectedScope,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to update meal");
+
+      const applyLocal = (day: CalendarDay): CalendarDay => {
+        const isTargetDate = day.date === dateStr;
+        const isFollowingTarget =
+          selectedScope === "FOLLOWING_DATES" &&
+          day.date > dateStr &&
+          day.isWorkingDay &&
+          !day.isLocked;
+        if (!isTargetDate && !isFollowingTarget) return day;
+
+        const hasMatch = day.records.length > 0;
+        const updatedRecords: CalendarGuestRecord[] = hasMatch
+          ? day.records.map((r) => ({
+              ...r,
+              quantity: nextQty,
+              totalPoisha: nextQty * r.unitPricePoisha,
+              source: isFollowingTarget ? "FOLLOWING_RULE" : "GUEST_OVERRIDE",
+              overrideScope: selectedScope,
+              isCustomized: true,
+            }))
+          : [
+              {
+                id: `temp-self-${day.date}`,
+                userId: "self",
+                guestName: "You",
+                guestEmail: "",
+                guestStatus: "ACTIVE",
+                guestMealStartDate: data?.guestMealStartDate ?? null,
+                quantity: nextQty,
+                unitPricePoisha: day.effectivePricePoisha,
+                totalPoisha: nextQty * day.effectivePricePoisha,
+                source: isFollowingTarget ? "FOLLOWING_RULE" : "GUEST_OVERRIDE",
+                overrideScope: selectedScope,
+                isCustomized: true,
+                isFinalized: false,
+              },
+            ];
+
+        return {
+          ...day,
+          records: updatedRecords,
+          totalMeals: updatedRecords.reduce((s, r) => s + r.quantity, 0),
+          activeGuestsCount: updatedRecords.filter((r) => r.quantity > 0).length,
+          totalAmountPoisha: updatedRecords.reduce((s, r) => s + r.totalPoisha, 0),
+        };
+      };
+
+      const nextData = data ? { ...data, days: data.days.map(applyLocal) } : data;
+      setData(nextData);
+      if (selectedScope === "FOLLOWING_DATES") {
+        invalidateCalendarCache();
+      }
+      if (nextData) {
+        setCachedCalendar(cacheKey, nextData);
+      }
+      invalidateDashboardCache();
+
+      toast.success("Meal schedule updated", { id: "meal-update" });
+      setConfirmGuestSaveOpen(false);
+      setSelectedDay(null);
+      setGuestDraftQty(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update meal", {
+        id: "meal-update",
+      });
+    } finally {
+      setSavingGuestMeal(false);
+    }
   }
 
   async function handleCopyDaySummary() {
@@ -891,7 +986,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
         </div>
 
         {loading ? (
-          <div className="p-12 text-center text-sm text-slate-500">Loading calendar...</div>
+          <CalendarSkeleton />
         ) : (
           <div className="grid grid-cols-7">
             {visibleCells.map((day, idx) => {
@@ -1008,7 +1103,9 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
       {/* Mobile Agenda List */}
       <div className="space-y-2 md:hidden">
         {loading ? (
-          <Card className="p-6 text-center text-sm text-slate-500">Loading calendar...</Card>
+          <Card className="p-2">
+            <CalendarSkeleton />
+          </Card>
         ) : (
           days.map((day) => {
             const dow = WEEKDAYS[getDayOfWeekUtc(day.date)];
@@ -1469,43 +1566,53 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
                     );
                   }
 
+                  const displayQty = guestDraftQty ?? qty;
+                  const hasGuestChanges =
+                    displayQty !== qty || applyScope === "FOLLOWING_DATES";
+
                   return (
                     <>
                       <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-4">
                         <div>
                           <p className="text-xs font-medium text-slate-500">Your Scheduled Meal</p>
                           <p className="text-xl font-bold text-slate-900 mt-0.5">
-                            {qty === 0 ? "OFF (0 meals)" : `${qty} meal${qty > 1 ? "s" : ""}`}
+                            {displayQty === 0
+                              ? "OFF (0 meals)"
+                              : `${displayQty} meal${displayQty > 1 ? "s" : ""}`}
                           </p>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            Expected Cost: {formatBDT(qty * selectedDay.effectivePricePoisha)}
+                            Expected Cost: {formatBDT(displayQty * selectedDay.effectivePricePoisha)}
                           </p>
                         </div>
                         {!selectedDay.isLocked ? (
                           <div className="flex flex-col items-end gap-2">
                             <div className="flex items-center gap-2">
                               <Button
-                                variant={qty === 0 ? "secondary" : "outline"}
+                                type="button"
+                                variant={displayQty === 0 ? "secondary" : "outline"}
                                 size="sm"
-                                disabled={qty === 0}
-                                onClick={() => handleUpdateMeal(selectedDay.date, 0)}
+                                disabled={displayQty === 0 || savingGuestMeal}
+                                onClick={() => setGuestDraftQty(0)}
                               >
                                 Turn OFF
                               </Button>
                               <div className="inline-flex items-center gap-1.5">
                                 <Button
+                                  type="button"
                                   size="icon"
                                   variant="outline"
-                                  disabled={qty <= 0}
-                                  onClick={() => handleUpdateMeal(selectedDay.date, qty - 1)}
+                                  disabled={displayQty <= 0 || savingGuestMeal}
+                                  onClick={() => setGuestDraftQty(Math.max(0, displayQty - 1))}
                                 >
                                   <Minus className="h-4 w-4" />
                                 </Button>
-                                <span className="w-8 text-center font-bold">{qty}</span>
+                                <span className="w-8 text-center font-bold">{displayQty}</span>
                                 <Button
+                                  type="button"
                                   size="icon"
                                   variant="outline"
-                                  onClick={() => handleUpdateMeal(selectedDay.date, qty + 1)}
+                                  disabled={savingGuestMeal}
+                                  onClick={() => setGuestDraftQty(displayQty + 1)}
                                 >
                                   <Plus className="h-4 w-4" />
                                 </Button>
@@ -1520,45 +1627,53 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
                       </div>
 
                       {!selectedDay.isLocked && (
-                        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-                          <span className="font-medium text-slate-700">Apply change to:</span>
-                          <div className="flex flex-wrap items-center gap-4 text-slate-700">
-                            <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                              <input
-                                type="radio"
-                                name="guest-scope"
-                                checked={applyScope === "SINGLE_DATE"}
-                                onChange={() => setApplyScope("SINGLE_DATE")}
-                              />
-                              This meal only
-                            </label>
-                            <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                              <input
-                                type="radio"
-                                name="guest-scope"
-                                checked={applyScope === "FOLLOWING_DATES"}
-                                onChange={() => setApplyScope("FOLLOWING_DATES")}
-                              />
-                              This and following meals
-                            </label>
-                            {applyScope === "FOLLOWING_DATES" && (
-                              <Button
-                                size="sm"
-                                variant="default"
-                                onClick={() =>
-                                  handleUpdateMeal(
-                                    selectedDay.date,
-                                    qty,
-                                    undefined,
-                                    "FOLLOWING_DATES"
-                                  )
-                                }
-                              >
-                                Apply ({qty} meal{qty === 1 ? "" : "s"}) to following
-                              </Button>
-                            )}
+                        <>
+                          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <span className="font-medium text-slate-700">Apply change to:</span>
+                            <div className="flex flex-wrap items-center gap-4 text-slate-700">
+                              <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="guest-scope"
+                                  checked={applyScope === "SINGLE_DATE"}
+                                  onChange={() => setApplyScope("SINGLE_DATE")}
+                                />
+                                This meal only
+                              </label>
+                              <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="guest-scope"
+                                  checked={applyScope === "FOLLOWING_DATES"}
+                                  onChange={() => setApplyScope("FOLLOWING_DATES")}
+                                />
+                                This and following meals
+                              </label>
+                            </div>
                           </div>
-                        </div>
+
+                          <div className="flex items-center justify-end gap-2 pt-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={savingGuestMeal}
+                              onClick={() => {
+                                setSelectedDay(null);
+                                setGuestDraftQty(null);
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              type="button"
+                              disabled={!hasGuestChanges || savingGuestMeal}
+                              onClick={() => setConfirmGuestSaveOpen(true)}
+                            >
+                              {savingGuestMeal && <Spinner />}
+                              {savingGuestMeal ? "Saving..." : "Save Changes"}
+                            </Button>
+                          </div>
+                        </>
                       )}
 
                       {selectedDay.isLocked && (
@@ -1625,6 +1740,30 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
           </div>
         )}
       </Dialog>
+
+      <ConfirmDialog
+        open={confirmGuestSaveOpen}
+        onClose={() => {
+          if (!savingGuestMeal) setConfirmGuestSaveOpen(false);
+        }}
+        onConfirm={() => void handleConfirmGuestSave()}
+        title="Confirm Meal Schedule Update"
+        description={
+          selectedDay
+            ? `Are you sure you want to set ${selectedDay.date} to ${
+                (guestDraftQty ?? 0) === 0
+                  ? "OFF (0 meals)"
+                  : `${guestDraftQty} meal${guestDraftQty === 1 ? "" : "s"}`
+              }${
+                applyScope === "FOLLOWING_DATES"
+                  ? " for this and all following working days"
+                  : " for this meal only"
+              }?`
+            : ""
+        }
+        confirmLabel="Yes, Save"
+        loading={savingGuestMeal}
+      />
 
       <EmailPreviewModal
         open={previewOpen}
