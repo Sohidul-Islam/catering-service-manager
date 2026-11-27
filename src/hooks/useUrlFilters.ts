@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   buildSearchParamsWithFilters,
@@ -46,14 +46,30 @@ export function useUrlFilters<S extends FilterSchema>(
 ): UseUrlFiltersResult<S> {
   const prefix = options?.prefix;
   const historyMode = options?.historyMode ?? "replace";
-  const resetKeys = options?.resetKeysOnFilterChange;
-  const nonResettingKeys = options?.nonResettingKeys;
+  const resetKeysSig = options?.resetKeysOnFilterChange?.join("\0") ?? "";
+  const nonResettingKeysSig = options?.nonResettingKeys?.join("\0") ?? "";
+  const resetKeys = useMemo(
+    () => (resetKeysSig ? (resetKeysSig.split("\0") as (keyof S)[]) : undefined),
+    [resetKeysSig]
+  );
+  const nonResettingKeys = useMemo(
+    () =>
+      nonResettingKeysSig
+        ? (nonResettingKeysSig.split("\0") as (keyof S)[])
+        : undefined,
+    [nonResettingKeysSig]
+  );
   const enabled = options?.enabled ?? true;
   const scroll = options?.scroll ?? false;
 
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const searchParamsRef = useRef(searchParams);
+
+  useEffect(() => {
+    searchParamsRef.current = searchParams;
+  }, [searchParams]);
 
   const [localState, setLocalState] = useState<FilterValues<S>>(() =>
     getDefaultValues(schema)
@@ -71,7 +87,7 @@ export function useUrlFilters<S extends FilterSchema>(
       const base =
         typeof window !== "undefined"
           ? new URLSearchParams(window.location.search)
-          : new URLSearchParams(searchParams.toString());
+          : new URLSearchParams(searchParamsRef.current.toString());
       const next = updater(base);
       const baseQuery = base.toString();
       const nextQuery = next.toString();
@@ -84,7 +100,7 @@ export function useUrlFilters<S extends FilterSchema>(
         router.replace(targetUrl, { scroll });
       }
     },
-    [historyMode, pathname, router, scroll, searchParams]
+    [historyMode, pathname, router, scroll]
   );
 
   const setFilters = useCallback(
