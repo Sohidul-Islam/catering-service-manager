@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Calendar, CreditCard, FileText, Lock, Minus, Plus, Utensils } from "lucide-react";
+import { Calendar, Clock, CreditCard, FileText, Lock, Minus, Plus, Utensils } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,12 @@ interface GuestDashboardData {
   month: number;
   today: string;
   tomorrow: string;
+  settings?: {
+    timezone: string;
+    deadlineHour: number;
+    deadlineMinute: number;
+    maxMealQty: number | null;
+  };
   todayMeal: { date: string; quantity: number; unitPricePoisha: number } | null;
   tomorrowMeal: { date: string; quantity: number; unitPricePoisha: number } | null;
   tomorrowLocked: boolean;
@@ -51,12 +57,43 @@ interface GuestDashboardData {
   }[];
 }
 
+function getCutoffCountdown(
+  timezone: string,
+  deadlineHour: number,
+  deadlineMinute: number,
+  nowMs: number
+): string | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+    }).formatToParts(new Date(nowMs));
+    const h = Number(parts.find((p) => p.type === "hour")?.value ?? 0) % 24;
+    const m = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+    const diffMins = deadlineHour * 60 + deadlineMinute - (h * 60 + m);
+    if (diffMins <= 0) return null;
+    const hrs = Math.floor(diffMins / 60);
+    const mins = diffMins % 60;
+    return hrs > 0 ? `${hrs}h ${mins}m left` : `${mins}m left`;
+  } catch {
+    return null;
+  }
+}
+
 export default function GuestDashboardPage() {
   const router = useRouter();
   const [data, setData] = useState<GuestDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seqRef = useRef(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 60000);
+    return () => clearInterval(id);
+  }, []);
 
   async function loadDashboard(silent = false, force = false) {
     const cacheKey = "GUEST";
@@ -171,6 +208,15 @@ export default function GuestDashboardPage() {
 
   const todayQty = data.todayMeal?.quantity ?? 0;
   const tomorrowQty = data.tomorrowMeal?.quantity ?? 0;
+  const countdownText =
+    data.tomorrowWorking && !data.tomorrowLocked && data.settings
+      ? getCutoffCountdown(
+          data.settings.timezone,
+          data.settings.deadlineHour,
+          data.settings.deadlineMinute,
+          nowMs
+        )
+      : null;
 
   return (
     <div className="space-y-6">
@@ -215,32 +261,39 @@ export default function GuestDashboardPage() {
                   : "OFF"}
             </p>
             {data.tomorrowWorking && !data.tomorrowLocked ? (
-              <div className="mt-2 flex items-center gap-1.5">
-                <Button
-                  size="sm"
-                  variant={tomorrowQty === 0 ? "secondary" : "outline"}
-                  disabled={tomorrowQty === 0}
-                  onClick={() => updateTomorrow(0)}
-                >
-                  OFF
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="h-8 w-8"
-                  disabled={tomorrowQty <= 0}
-                  onClick={() => updateTomorrow(tomorrowQty - 1)}
-                >
-                  <Minus className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="h-8 w-8"
-                  onClick={() => updateTomorrow(tomorrowQty + 1)}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </Button>
+              <div className="mt-2 space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant={tomorrowQty === 0 ? "secondary" : "outline"}
+                    disabled={tomorrowQty === 0}
+                    onClick={() => updateTomorrow(0)}
+                  >
+                    OFF
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="h-8 w-8"
+                    disabled={tomorrowQty <= 0}
+                    onClick={() => updateTomorrow(tomorrowQty - 1)}
+                  >
+                    <Minus className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="h-8 w-8"
+                    onClick={() => updateTomorrow(tomorrowQty + 1)}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                {countdownText && (
+                  <p className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-700">
+                    <Clock className="h-3 w-3" /> {countdownText} before cutoff
+                  </p>
+                )}
               </div>
             ) : data.tomorrowLocked ? (
               <Badge className="mt-2" variant="danger">

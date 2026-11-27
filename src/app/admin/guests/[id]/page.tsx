@@ -19,50 +19,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageLoader } from "@/components/ui/loading-state";
+import { formatActivityDetails } from "@/lib/activity-format";
 import { formatBDT } from "@/lib/money";
 import { toast } from "sonner";
-
-function formatActivityValue(raw: string | null): string {
-  if (!raw) return "";
-  const trimmed = raw.trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-    try {
-      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-      const hiddenKeys = new Set(["messageId", "invoiceId"]);
-      const entries = Object.entries(parsed).filter(
-        ([k, v]) => !hiddenKeys.has(k) && v !== undefined && v !== null && v !== ""
-      );
-      if (entries.length > 0) {
-        return entries
-          .map(([k, v]) => {
-            const label = k
-              .replace(/([A-Z])/g, " $1")
-              .replace(/^./, (c) => c.toUpperCase());
-            return `${label}: ${String(v)}`;
-          })
-          .join(" • ");
-      }
-    } catch {
-      // Fallback to raw string if not valid JSON
-    }
-  }
-  return raw;
-}
-
-function formatActivityDetails(
-  previousValue: string | null,
-  newValue: string | null,
-  reason: string | null
-): string {
-  const prevFormatted = formatActivityValue(previousValue);
-  const nextFormatted = formatActivityValue(newValue);
-  const transition =
-    prevFormatted && nextFormatted
-      ? `${prevFormatted} → ${nextFormatted}`
-      : nextFormatted || prevFormatted;
-  if (transition && reason) return `${transition} (${reason})`;
-  return transition || reason || "—";
-}
 
 interface GuestProfileResponse {
   guest: {
@@ -256,8 +215,8 @@ export default function AdminGuestProfilePage() {
                 guest.status === "ACTIVE"
                   ? "success"
                   : guest.status === "INVITED"
-                  ? "warning"
-                  : "muted"
+                    ? "warning"
+                    : "muted"
               }
             >
               {guest.status}
@@ -316,8 +275,8 @@ export default function AdminGuestProfilePage() {
               {!dashboard.tomorrowWorking
                 ? "Closed"
                 : tomorrowQty > 0
-                ? `${tomorrowQty} Meal${tomorrowQty > 1 ? "s" : ""}`
-                : "OFF"}
+                  ? `${tomorrowQty} Meal${tomorrowQty > 1 ? "s" : ""}`
+                  : "OFF"}
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               {dashboard.tomorrowPendingRequest ? (
@@ -463,8 +422,8 @@ export default function AdminGuestProfilePage() {
                           inv.status === "PAID"
                             ? "success"
                             : inv.status === "PARTIALLY_PAID"
-                            ? "warning"
-                            : "danger"
+                              ? "warning"
+                              : "danger"
                         }
                       >
                         {inv.status.replace("_", " ")}

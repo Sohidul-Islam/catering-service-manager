@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatBDT } from "@/lib/money";
+import { TableSkeleton } from "@/components/ui/loading-state";
 import { toast } from "sonner";
 
 interface GuestInvoice {
@@ -66,7 +67,7 @@ export default function GuestInvoicesPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Loading...</p>
+            <TableSkeleton rows={4} label="Loading invoices..." />
           ) : invoices.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">No invoices generated yet.</p>
           ) : (

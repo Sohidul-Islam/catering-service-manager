@@ -228,7 +228,7 @@ export default function AdminMealConfirmationsPage() {
         <div>
           <h2 className="text-xl font-bold text-slate-900">Daily Meal Confirmations</h2>
           <p className="text-sm text-slate-500">
-            Manually preview and send daily meal confirmation emails via Resend.
+            Manually preview and send daily meal confirmation emails.
           </p>
         </div>
 

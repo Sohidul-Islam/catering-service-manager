@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatBDT } from "@/lib/money";
+import { TableSkeleton } from "@/components/ui/loading-state";
 import { toast } from "sonner";
 
 interface GuestPayment {
@@ -54,7 +55,7 @@ export default function GuestPaymentsPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Loading...</p>
+            <TableSkeleton rows={4} label="Loading payments..." />
           ) : payments.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">No payments recorded yet.</p>
           ) : (

@@ -64,9 +64,11 @@ const GUEST_NAV = [
 
 export function AppShell({
   user,
+  cutoffLabel = "Lunch Only • Asia/Dhaka (11:50 PM Cutoff)",
   children,
 }: {
   user: NavUser;
+  cutoffLabel?: string;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -228,7 +230,7 @@ export function AppShell({
             </h1>
           </div>
           <div className="flex items-center gap-3 text-xs text-slate-500">
-            <span className="hidden sm:inline">Lunch Only • Asia/Dhaka (11:50 PM Cutoff)</span>
+            <span className="hidden sm:inline">{cutoffLabel}</span>
           </div>
         </header>
 

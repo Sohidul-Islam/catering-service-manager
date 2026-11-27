@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatBDT, poishaToBdt } from "@/lib/money";
+import { TableSkeleton } from "@/components/ui/loading-state";
 import { toast } from "sonner";
 
 interface MealPriceRow {
@@ -218,7 +219,7 @@ export default function AdminPricingPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Loading...</p>
+            <TableSkeleton rows={4} label="Loading pricing overrides..." />
           ) : prices.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">No date overrides configured.</p>
           ) : (

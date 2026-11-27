@@ -1,6 +1,7 @@
 import React from "react";
 import { notFound } from "next/navigation";
 import { CheckCircle2, Clock, UtensilsCrossed } from "lucide-react";
+import { PrintInvoiceButton } from "@/components/invoice/PrintInvoiceButton";
 import { getPublicInvoiceByToken } from "@/services/public-invoice.service";
 import { formatBDT } from "@/lib/money";
 import { formatReadableDate } from "@/lib/timezone";
@@ -29,8 +30,8 @@ export default async function PublicInvoicePage({
   });
 
   return (
-    <div className="min-h-screen bg-slate-100 py-8 px-4 sm:py-12">
-      <div className="mx-auto max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div className="min-h-screen bg-slate-100 py-8 px-4 sm:py-12 print:bg-white print:py-0 print:px-0">
+      <div className="mx-auto max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden print:border-0 print:shadow-none">
         {/* Header */}
         <div className="bg-slate-900 px-6 py-6 sm:px-8 text-white flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -45,24 +46,27 @@ export default async function PublicInvoicePage({
             </div>
           </div>
 
-          <div className="text-left sm:text-right">
-            <p className="text-sm font-medium text-slate-200">{billingPeriod}</p>
-            <span
-              className={`mt-1 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                invoice.status === "PAID"
-                  ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/30"
-                  : invoice.status === "PARTIALLY_PAID"
-                  ? "bg-amber-500/20 text-amber-200 border border-amber-400/30"
-                  : "bg-red-500/20 text-red-200 border border-red-400/30"
-              }`}
-            >
-              {invoice.status === "PAID" ? (
-                <CheckCircle2 className="h-3 w-3" />
-              ) : (
-                <Clock className="h-3 w-3" />
-              )}
-              {invoice.status.replace("_", " ")}
-            </span>
+          <div className="flex flex-col items-start sm:items-end gap-2">
+            <div className="text-left sm:text-right">
+              <p className="text-sm font-medium text-slate-200">{billingPeriod}</p>
+              <span
+                className={`mt-1 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                  invoice.status === "PAID"
+                    ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/30"
+                    : invoice.status === "PARTIALLY_PAID"
+                    ? "bg-amber-500/20 text-amber-200 border border-amber-400/30"
+                    : "bg-red-500/20 text-red-200 border border-red-400/30"
+                }`}
+              >
+                {invoice.status === "PAID" ? (
+                  <CheckCircle2 className="h-3 w-3" />
+                ) : (
+                  <Clock className="h-3 w-3" />
+                )}
+                {invoice.status.replace("_", " ")}
+              </span>
+            </div>
+            <PrintInvoiceButton />
           </div>
         </div>
 

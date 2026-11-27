@@ -15,6 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TableSkeleton } from "@/components/ui/loading-state";
 import { toast } from "sonner";
 
 interface HolidayRow {
@@ -203,7 +204,7 @@ export default function AdminHolidaysPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Loading...</p>
+            <TableSkeleton rows={4} label="Loading holidays..." />
           ) : holidays.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">No holidays configured.</p>
           ) : (

@@ -402,8 +402,8 @@ export function MealCalendar({
             source: isFollowingTarget
               ? "FOLLOWING_RULE"
               : mode === "ADMIN"
-              ? "ADMIN_OVERRIDE"
-              : "GUEST_OVERRIDE",
+                ? "ADMIN_OVERRIDE"
+                : "GUEST_OVERRIDE",
             overrideScope: selectedScope,
             isCustomized: true,
           };
@@ -580,7 +580,7 @@ export function MealCalendar({
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to send adjustment email");
-      toast.success("Meal adjustment email sent via Resend");
+      toast.success("Meal adjustment email sent");
       setPreviewOpen(false);
       setLastAdjustment(null);
     } catch (err) {
@@ -707,30 +707,30 @@ export function MealCalendar({
         const hasMatch = day.records.length > 0;
         const updatedRecords: CalendarGuestRecord[] = hasMatch
           ? day.records.map((r) => ({
-              ...r,
+            ...r,
+            quantity: nextQty,
+            totalPoisha: nextQty * r.unitPricePoisha,
+            source: isFollowingTarget ? "FOLLOWING_RULE" : "GUEST_OVERRIDE",
+            overrideScope: selectedScope,
+            isCustomized: true,
+          }))
+          : [
+            {
+              id: `temp-self-${day.date}`,
+              userId: "self",
+              guestName: "You",
+              guestEmail: "",
+              guestStatus: "ACTIVE",
+              guestMealStartDate: data?.guestMealStartDate ?? null,
               quantity: nextQty,
-              totalPoisha: nextQty * r.unitPricePoisha,
+              unitPricePoisha: day.effectivePricePoisha,
+              totalPoisha: nextQty * day.effectivePricePoisha,
               source: isFollowingTarget ? "FOLLOWING_RULE" : "GUEST_OVERRIDE",
               overrideScope: selectedScope,
               isCustomized: true,
-            }))
-          : [
-              {
-                id: `temp-self-${day.date}`,
-                userId: "self",
-                guestName: "You",
-                guestEmail: "",
-                guestStatus: "ACTIVE",
-                guestMealStartDate: data?.guestMealStartDate ?? null,
-                quantity: nextQty,
-                unitPricePoisha: day.effectivePricePoisha,
-                totalPoisha: nextQty * day.effectivePricePoisha,
-                source: isFollowingTarget ? "FOLLOWING_RULE" : "GUEST_OVERRIDE",
-                overrideScope: selectedScope,
-                isCustomized: true,
-                isFinalized: false,
-              },
-            ];
+              isFinalized: false,
+            },
+          ];
 
         return {
           ...day,
@@ -780,8 +780,8 @@ export function MealCalendar({
           selectedDay.date === todayStr
             ? "today"
             : selectedDay.date === tomorrowStr
-            ? "tomorrow"
-            : "custom",
+              ? "tomorrow"
+              : "custom",
         today: todayStr,
         tomorrow: tomorrowStr,
         startDate: selectedDay.date,
@@ -1086,43 +1086,43 @@ export function MealCalendar({
                     {(day.isWorkingDay ||
                       (mode === "ADMIN" && day.totalMeals > 0) ||
                       (showSingleGuestCell && myQty > 0)) && (
-                      <>
-                        {showSingleGuestCell &&
-                        data?.guestMealStartDate &&
-                        day.date < data.guestMealStartDate ? (
-                          myQty > 0 ? (
-                            <>
-                              <p className="text-xs font-semibold text-slate-800">
-                                {myQty} meal{myQty === 1 ? "" : "s"}
-                              </p>
-                              <p className="text-[10px] text-slate-500 font-medium">
-                                Admin record
-                              </p>
-                            </>
+                        <>
+                          {showSingleGuestCell &&
+                            data?.guestMealStartDate &&
+                            day.date < data.guestMealStartDate ? (
+                            myQty > 0 ? (
+                              <>
+                                <p className="text-xs font-semibold text-slate-800">
+                                  {myQty} meal{myQty === 1 ? "" : "s"}
+                                </p>
+                                <p className="text-[10px] text-slate-500 font-medium">
+                                  Admin record
+                                </p>
+                              </>
+                            ) : (
+                              <p className="text-[11px] text-slate-400">Before start date</p>
+                            )
                           ) : (
-                            <p className="text-[11px] text-slate-400">Before start date</p>
-                          )
-                        ) : (
-                          <p className="text-xs font-semibold text-slate-800">
-                            {mode === "ADMIN" && !isSingleGuestAdmin
-                              ? `${day.totalMeals} meal${day.totalMeals === 1 ? "" : "s"} (${day.activeGuestsCount} guests)`
-                              : `${myQty} meal${myQty === 1 ? "" : "s"}`}
-                          </p>
-                        )}
-                        {showSingleGuestCell &&
-                          day.records[0]?.overrideScope === "SINGLE_DATE" && (
-                            <p className="text-[10px] text-blue-600 font-medium">
-                              Modified for this day
+                            <p className="text-xs font-semibold text-slate-800">
+                              {mode === "ADMIN" && !isSingleGuestAdmin
+                                ? `${day.totalMeals} meal${day.totalMeals === 1 ? "" : "s"} (${day.activeGuestsCount} guests)`
+                                : `${myQty} meal${myQty === 1 ? "" : "s"}`}
                             </p>
                           )}
-                        {showSingleGuestCell &&
-                          day.records[0]?.source === "FOLLOWING_RULE" && (
-                            <p className="text-[10px] text-violet-600 font-medium">
-                              Following rule
-                            </p>
-                          )}
-                      </>
-                    )}
+                          {showSingleGuestCell &&
+                            day.records[0]?.overrideScope === "SINGLE_DATE" && (
+                              <p className="text-[10px] text-blue-600 font-medium">
+                                Modified for this day
+                              </p>
+                            )}
+                          {showSingleGuestCell &&
+                            day.records[0]?.source === "FOLLOWING_RULE" && (
+                              <p className="text-[10px] text-violet-600 font-medium">
+                                Following rule
+                              </p>
+                            )}
+                        </>
+                      )}
                     {mode === "ADMIN" &&
                       (day.isWorkingDay || day.totalMeals > 0) &&
                       day.totalAmountPoisha > 0 && (
@@ -1207,8 +1207,8 @@ export function MealCalendar({
         description={
           selectedDay
             ? `${WEEKDAYS[getDayOfWeekUtc(selectedDay.date)]} • Price: ${formatBDT(
-                selectedDay.effectivePricePoisha
-              )} ${selectedDay.hasCustomPrice ? "(Custom Date Price)" : "(Default Price)"}`
+              selectedDay.effectivePricePoisha
+            )} ${selectedDay.hasCustomPrice ? "(Custom Date Price)" : "(Default Price)"}`
             : ""
         }
         maxWidthClass="max-w-2xl"
@@ -1368,31 +1368,31 @@ export function MealCalendar({
                     ...selectedDay.records.map((r) => ({ ...r, hasRecord: true })),
                     ...(showUnscheduledGuests
                       ? missingGuests.map((g) => ({
-                          id: `virtual-${g.id}`,
-                          userId: g.id,
-                          guestName: g.name,
-                          guestEmail: g.email,
-                          guestStatus: g.status,
-                          guestMealStartDate: g.mealStartDate,
-                          quantity: 0,
-                          unitPricePoisha: selectedDay.effectivePricePoisha,
-                          totalPoisha: 0,
-                          source: undefined,
-                          overrideScope: null,
-                          isCustomized: false,
-                          isFinalized: false,
-                          hasRecord: false,
-                        }))
+                        id: `virtual-${g.id}`,
+                        userId: g.id,
+                        guestName: g.name,
+                        guestEmail: g.email,
+                        guestStatus: g.status,
+                        guestMealStartDate: g.mealStartDate,
+                        quantity: 0,
+                        unitPricePoisha: selectedDay.effectivePricePoisha,
+                        totalPoisha: 0,
+                        source: undefined,
+                        overrideScope: null,
+                        isCustomized: false,
+                        isFinalized: false,
+                        hasRecord: false,
+                      }))
                       : []),
                   ].sort((a, b) => a.guestName.localeCompare(b.guestName));
 
                   const searchLower = guestSearch.trim().toLowerCase();
                   const filteredRows = searchLower
                     ? combinedRows.filter(
-                        (r) =>
-                          r.guestName.toLowerCase().includes(searchLower) ||
-                          r.guestEmail.toLowerCase().includes(searchLower)
-                      )
+                      (r) =>
+                        r.guestName.toLowerCase().includes(searchLower) ||
+                        r.guestEmail.toLowerCase().includes(searchLower)
+                    )
                     : combinedRows;
 
                   const hasBeforeStartRows = combinedRows.some(
@@ -1709,7 +1709,13 @@ export function MealCalendar({
                             <Button
                               type="button"
                               disabled={!hasGuestChanges || savingGuestMeal}
-                              onClick={() => setConfirmGuestSaveOpen(true)}
+                              onClick={() => {
+                                if (applyScope === "FOLLOWING_DATES") {
+                                  setConfirmGuestSaveOpen(true);
+                                } else {
+                                  void handleConfirmGuestSave();
+                                }
+                              }}
                             >
                               {savingGuestMeal && <Spinner />}
                               {savingGuestMeal ? "Saving..." : "Save Changes"}
@@ -1792,15 +1798,13 @@ export function MealCalendar({
         title="Confirm Meal Schedule Update"
         description={
           selectedDay
-            ? `Are you sure you want to set ${selectedDay.date} to ${
-                (guestDraftQty ?? 0) === 0
-                  ? "OFF (0 meals)"
-                  : `${guestDraftQty} meal${guestDraftQty === 1 ? "" : "s"}`
-              }${
-                applyScope === "FOLLOWING_DATES"
-                  ? " for this and all following working days"
-                  : " for this meal only"
-              }?`
+            ? `Are you sure you want to set ${selectedDay.date} to ${(guestDraftQty ?? 0) === 0
+              ? "OFF (0 meals)"
+              : `${guestDraftQty} meal${guestDraftQty === 1 ? "" : "s"}`
+            }${applyScope === "FOLLOWING_DATES"
+              ? " for this and all following working days"
+              : " for this meal only"
+            }?`
             : ""
         }
         confirmLabel="Yes, Save"

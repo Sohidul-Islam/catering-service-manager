@@ -12,6 +12,8 @@ import {
   Mail,
   Plus,
   RefreshCw,
+  RotateCcw,
+  Search,
   Send,
   UserCheck,
   Users,
@@ -40,6 +42,8 @@ import {
 } from "@/components/ui/table";
 import { formatBDT } from "@/lib/money";
 import { invalidateCalendarCache } from "@/lib/calendar-cache";
+import { useUrlFilters } from "@/hooks/useUrlFilters";
+import { filterCodecs } from "@/lib/url-filters";
 import { toast } from "sonner";
 
 interface GuestRow {
@@ -57,6 +61,22 @@ interface GuestRow {
 }
 
 export default function AdminGuestsPage() {
+  const guestsSchema = useMemo(
+    () => ({
+      search: filterCodecs.string(""),
+      status: filterCodecs.enum(["", "ACTIVE", "INVITED", "INACTIVE"] as const, ""),
+      preference: filterCodecs.enum(["", "REGULAR", "OCCASIONAL"] as const, ""),
+    }),
+    []
+  );
+
+  const {
+    filters: { search, status: statusFilter, preference: preferenceFilter },
+    setFilter,
+    resetFilters,
+    hasActiveFilters,
+  } = useUrlFilters(guestsSchema);
+
   const [guests, setGuests] = useState<GuestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -429,136 +449,221 @@ export default function AdminGuestsPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>All Guests ({guests.length})</CardTitle>
-          <CardDescription>Inactive guests retain history but receive no new schedules</CardDescription>
+        <CardHeader className="flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            {(() => {
+              const q = search.trim().toLowerCase();
+              const filteredCount = guests.filter((g) => {
+                if (statusFilter && g.status !== statusFilter) return false;
+                if (preferenceFilter && g.mealPreference !== preferenceFilter) return false;
+                if (
+                  q &&
+                  !g.name.toLowerCase().includes(q) &&
+                  !g.email.toLowerCase().includes(q) &&
+                  !(g.phone?.toLowerCase().includes(q) ?? false)
+                ) {
+                  return false;
+                }
+                return true;
+              }).length;
+              return (
+                <CardTitle>
+                  All Guests ({filteredCount}
+                  {filteredCount !== guests.length ? ` of ${guests.length}` : ""})
+                </CardTitle>
+              );
+            })()}
+            <CardDescription>Inactive guests retain history but receive no new schedules</CardDescription>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Input
+                value={search}
+                onChange={(e) => setFilter("search", e.target.value)}
+                placeholder="Search name, email, phone..."
+                className="pl-8 w-52 h-9 text-xs"
+              />
+            </div>
+            <Select
+              className="w-32 h-9 text-xs"
+              value={statusFilter}
+              onChange={(e) =>
+                setFilter("status", e.target.value as "" | "ACTIVE" | "INVITED" | "INACTIVE")
+              }
+            >
+              <option value="">All Statuses</option>
+              <option value="ACTIVE">Active</option>
+              <option value="INVITED">Invited</option>
+              <option value="INACTIVE">Inactive</option>
+            </Select>
+            <Select
+              className="w-36 h-9 text-xs"
+              value={preferenceFilter}
+              onChange={(e) =>
+                setFilter("preference", e.target.value as "" | "REGULAR" | "OCCASIONAL")
+              }
+            >
+              <option value="">All Preferences</option>
+              <option value="REGULAR">Regular</option>
+              <option value="OCCASIONAL">Occasional</option>
+            </Select>
+            {hasActiveFilters && (
+              <Button size="sm" variant="ghost" onClick={resetFilters}>
+                <RotateCcw className="h-3.5 w-3.5" /> Reset
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
             <TableSkeleton rows={5} label="Loading guests..." />
-          ) : guests.length === 0 ? (
-            <p className="text-sm text-slate-500 py-6 text-center">No guests yet.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Guest</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Preference</TableHead>
-                  <TableHead>Meal Start</TableHead>
-                  <TableHead className="text-right">Default Qty</TableHead>
-                  <TableHead className="text-right">Outstanding</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {guests.map((g) => (
-                  <TableRow key={g.id}>
-                    <TableCell>
-                      <Link
-                        href={`/admin/guests/${g.id}`}
-                        className="font-medium text-slate-900 hover:text-blue-600 hover:underline"
-                      >
-                        {g.name}
-                      </Link>
-                      <p className="text-xs text-slate-500">{g.email}</p>
-                      {g.phone && <p className="text-xs text-slate-400">{g.phone}</p>}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          g.status === "ACTIVE"
-                            ? "success"
-                            : g.status === "INVITED"
-                            ? "warning"
-                            : "muted"
-                        }
-                      >
-                        {g.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={g.mealPreference === "REGULAR" ? "info" : "default"}>
-                        {g.mealPreference}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs text-slate-600">
-                      {g.mealStartDate || "Not set (Calendar)"}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">{g.defaultMealQty}</TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatBDT(g.outstandingPoisha)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {(() => {
-                        const menuItems: ActionMenuItem[] = [
-                          {
-                            key: "profile",
-                            label: "View Profile",
-                            icon: <Eye className="h-3.5 w-3.5" />,
-                            href: `/admin/guests/${g.id}`,
-                          },
-                          {
-                            key: "edit",
-                            label: "Edit Guest",
-                            icon: <UserCheck className="h-3.5 w-3.5" />,
-                            onClick: () => setEditGuest(g),
-                          },
-                          {
-                            key: "history",
-                            label: "View History",
-                            icon: <History className="h-3.5 w-3.5" />,
-                            onClick: () => openHistory(g.id),
-                          },
-                        ];
+          ) : (() => {
+            const q = search.trim().toLowerCase();
+            const filteredGuests = guests.filter((g) => {
+              if (statusFilter && g.status !== statusFilter) return false;
+              if (preferenceFilter && g.mealPreference !== preferenceFilter) return false;
+              if (
+                q &&
+                !g.name.toLowerCase().includes(q) &&
+                !g.email.toLowerCase().includes(q) &&
+                !(g.phone?.toLowerCase().includes(q) ?? false)
+              ) {
+                return false;
+              }
+              return true;
+            });
 
-                        if (g.status === "INVITED") {
-                          if (g.invitation?.token) {
-                            menuItems.push({
-                              key: "copy-invite",
-                              label: "Copy Invite Link",
-                              icon: <Copy className="h-3.5 w-3.5" />,
-                              dividerBefore: true,
-                              onClick: () =>
-                                copyLink(
-                                  `${window.location.origin}/invite/accept?token=${g.invitation!.token}`
-                                ),
-                            });
-                          }
-                          menuItems.push({
-                            key: "reinvite",
-                            label: "Resend Invite Link",
-                            icon: <RefreshCw className="h-3.5 w-3.5" />,
-                            dividerBefore: !g.invitation?.token,
-                            onClick: () => handleReinvite(g.id),
-                          });
-                        } else {
-                          if (g.status === "ACTIVE") {
-                            menuItems.push({
-                              key: "reset-link",
-                              label: "Send Password Reset Link",
-                              icon: <Send className="h-3.5 w-3.5" />,
-                              dividerBefore: true,
-                              onClick: () => setResetLinkGuest(g),
-                            });
-                          }
-                          menuItems.push({
-                            key: "change-password",
-                            label: "Change Password",
-                            icon: <KeyRound className="h-3.5 w-3.5" />,
-                            dividerBefore: g.status !== "ACTIVE",
-                            onClick: () => openManualPasswordModal(g),
-                          });
-                        }
+            if (filteredGuests.length === 0) {
+              return (
+                <p className="text-sm text-slate-500 py-6 text-center">
+                  {guests.length === 0 ? "No guests yet." : "No guests match your filters."}
+                </p>
+              );
+            }
 
-                        return <ActionMenu label={`Actions for ${g.name}`} items={menuItems} />;
-                      })()}
-                    </TableCell>
+            return (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Guest</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Preference</TableHead>
+                    <TableHead>Meal Start</TableHead>
+                    <TableHead className="text-right">Default Qty</TableHead>
+                    <TableHead className="text-right">Outstanding</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+                </TableHeader>
+                <TableBody>
+                  {filteredGuests.map((g) => (
+                    <TableRow key={g.id}>
+                      <TableCell>
+                        <Link
+                          href={`/admin/guests/${g.id}`}
+                          className="font-medium text-slate-900 hover:text-blue-600 hover:underline"
+                        >
+                          {g.name}
+                        </Link>
+                        <p className="text-xs text-slate-500">{g.email}</p>
+                        {g.phone && <p className="text-xs text-slate-400">{g.phone}</p>}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            g.status === "ACTIVE"
+                              ? "success"
+                              : g.status === "INVITED"
+                                ? "warning"
+                                : "muted"
+                          }
+                        >
+                          {g.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={g.mealPreference === "REGULAR" ? "info" : "default"}>
+                          {g.mealPreference}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-slate-600">
+                        {g.mealStartDate || "Not set (Calendar)"}
+                      </TableCell>
+                      <TableCell className="text-right font-medium">{g.defaultMealQty}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatBDT(g.outstandingPoisha)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {(() => {
+                          const menuItems: ActionMenuItem[] = [
+                            {
+                              key: "profile",
+                              label: "View Profile",
+                              icon: <Eye className="h-3.5 w-3.5" />,
+                              href: `/admin/guests/${g.id}`,
+                            },
+                            {
+                              key: "edit",
+                              label: "Edit Guest",
+                              icon: <UserCheck className="h-3.5 w-3.5" />,
+                              onClick: () => setEditGuest(g),
+                            },
+                            {
+                              key: "history",
+                              label: "View History",
+                              icon: <History className="h-3.5 w-3.5" />,
+                              onClick: () => openHistory(g.id),
+                            },
+                          ];
+
+                          if (g.status === "INVITED") {
+                            if (g.invitation?.token) {
+                              menuItems.push({
+                                key: "copy-invite",
+                                label: "Copy Invite Link",
+                                icon: <Copy className="h-3.5 w-3.5" />,
+                                dividerBefore: true,
+                                onClick: () =>
+                                  copyLink(
+                                    `${window.location.origin}/invite/accept?token=${g.invitation!.token}`
+                                  ),
+                              });
+                            }
+                            menuItems.push({
+                              key: "reinvite",
+                              label: "Resend Invite Link",
+                              icon: <RefreshCw className="h-3.5 w-3.5" />,
+                              dividerBefore: !g.invitation?.token,
+                              onClick: () => handleReinvite(g.id),
+                            });
+                          } else {
+                            if (g.status === "ACTIVE") {
+                              menuItems.push({
+                                key: "reset-link",
+                                label: "Send Password Reset Link",
+                                icon: <Send className="h-3.5 w-3.5" />,
+                                dividerBefore: true,
+                                onClick: () => setResetLinkGuest(g),
+                              });
+                            }
+                            menuItems.push({
+                              key: "change-password",
+                              label: "Change Password",
+                              icon: <KeyRound className="h-3.5 w-3.5" />,
+                              dividerBefore: g.status !== "ACTIVE",
+                              onClick: () => openManualPasswordModal(g),
+                            });
+                          }
+
+                          return <ActionMenu label={`Actions for ${g.name}`} items={menuItems} />;
+                        })()}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            );
+          })()}
         </CardContent>
       </Card>
 

@@ -212,57 +212,65 @@ export default function AdminDashboardPage() {
 
       {/* KPI Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-500">Active Guests</span>
-              <Users className="h-4 w-4 text-blue-600" />
-            </div>
-            <p className="mt-2 text-2xl font-bold text-slate-900">{stats.activeGuestsCount}</p>
-            <p className="mt-1 text-xs text-slate-500">Receiving lunch schedules</p>
-          </CardContent>
-        </Card>
+        <Link href="/admin/guests?status=ACTIVE" className="block group">
+          <Card className="h-full transition-all group-hover:border-blue-300 group-hover:shadow-xs">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500">Active Guests</span>
+                <Users className="h-4 w-4 text-blue-600" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-slate-900">{stats.activeGuestsCount}</p>
+              <p className="mt-1 text-xs text-slate-500">Receiving lunch schedules</p>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-500">Today&apos;s Meals</span>
-              <Utensils className="h-4 w-4 text-emerald-600" />
-            </div>
-            <p className="mt-2 text-2xl font-bold text-slate-900">{stats.todayMeals}</p>
-            <p className="mt-1 text-xs text-slate-500">Tomorrow expected: {stats.tomorrowMeals}</p>
-          </CardContent>
-        </Card>
+        <Link href="/admin/calendar" className="block group">
+          <Card className="h-full transition-all group-hover:border-emerald-300 group-hover:shadow-xs">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500">Today&apos;s Meals</span>
+                <Utensils className="h-4 w-4 text-emerald-600" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-slate-900">{stats.todayMeals}</p>
+              <p className="mt-1 text-xs text-slate-500">Tomorrow expected: {stats.tomorrowMeals}</p>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-500">Monthly Meals & Amount</span>
-              <Calendar className="h-4 w-4 text-violet-600" />
-            </div>
-            <p className="mt-2 text-2xl font-bold text-slate-900">
-              {stats.monthlyMeals} meals
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              Expected: {formatBDT(stats.monthlyAmountPoisha)}
-            </p>
-          </CardContent>
-        </Card>
+        <Link href="/admin/reports" className="block group">
+          <Card className="h-full transition-all group-hover:border-violet-300 group-hover:shadow-xs">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500">Monthly Meals & Amount</span>
+                <Calendar className="h-4 w-4 text-violet-600" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-slate-900">
+                {stats.monthlyMeals} meals
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Expected: {formatBDT(stats.monthlyAmountPoisha)}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-500">Outstanding Dues</span>
-              <CreditCard className="h-4 w-4 text-red-600" />
-            </div>
-            <p className="mt-2 text-2xl font-bold text-slate-900">
-              {formatBDT(stats.outstandingDuesPoisha)}
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              Collected this month: {formatBDT(stats.collectedPaymentsPoisha)}
-            </p>
-          </CardContent>
-        </Card>
+        <Link href="/admin/invoices?status=UNPAID" className="block group">
+          <Card className="h-full transition-all group-hover:border-red-300 group-hover:shadow-xs">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500">Outstanding Dues</span>
+                <CreditCard className="h-4 w-4 text-red-600" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-slate-900">
+                {formatBDT(stats.outstandingDuesPoisha)}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Collected this month: {formatBDT(stats.collectedPaymentsPoisha)}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
       {/* Pending requests banner if any */}
@@ -442,7 +450,12 @@ export default function AdminDashboardPage() {
                 {data.guestBalances.map((g) => (
                   <TableRow key={g.id}>
                     <TableCell>
-                      <p className="font-medium text-slate-900">{g.name}</p>
+                      <Link
+                        href={`/admin/guests/${g.id}`}
+                        className="font-medium text-slate-900 hover:text-blue-600 hover:underline"
+                      >
+                        {g.name}
+                      </Link>
                       <p className="text-xs text-slate-500">{g.email}</p>
                     </TableCell>
                     <TableCell className="text-right">{formatBDT(g.billedPoisha)}</TableCell>

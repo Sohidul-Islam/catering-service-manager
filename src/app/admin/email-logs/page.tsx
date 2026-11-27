@@ -1,11 +1,11 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -51,12 +51,13 @@ export default function AdminEmailLogsPage() {
         ""
       ),
       status: filterCodecs.enum(["", "SENT", "FAILED", "PENDING"] as const, ""),
+      search: filterCodecs.string(""),
     }),
     []
   );
 
   const {
-    filters: { emailType: typeFilter, status: statusFilter },
+    filters: { emailType: typeFilter, status: statusFilter, search },
     setFilter,
     resetFilters,
     hasActiveFilters,
@@ -81,17 +82,38 @@ export default function AdminEmailLogsPage() {
       .finally(() => setLoading(false));
   }, [typeFilter, statusFilter]);
 
+  const visibleLogs = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return logs;
+    return logs.filter(
+      (l) =>
+        l.recipientEmail.toLowerCase().includes(q) ||
+        l.subject.toLowerCase().includes(q) ||
+        (l.guest?.name.toLowerCase().includes(q) ?? false) ||
+        (l.invoice?.invoiceNumber.toLowerCase().includes(q) ?? false)
+    );
+  }, [logs, search]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-900">Email Sending History</h2>
           <p className="text-sm text-slate-500">
-            Audit trail for all manual Resend emails (confirmations, adjustments, invoices, receipts).
+            Audit trail for all outgoing emails (confirmations, adjustments, invoices, receipts, resets).
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Input
+              value={search}
+              onChange={(e) => setFilter("search", e.target.value)}
+              placeholder="Search recipient, subject..."
+              className="pl-8 w-52 h-9 text-xs"
+            />
+          </div>
           <Select
             className="w-48"
             value={typeFilter}
@@ -139,14 +161,17 @@ export default function AdminEmailLogsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Email Logs ({logs.length})</CardTitle>
-          <CardDescription>Tracks Resend message IDs, delivery status, and errors</CardDescription>
+          <CardTitle>
+            Email Logs ({visibleLogs.length}
+            {visibleLogs.length !== logs.length ? ` of ${logs.length}` : ""})
+          </CardTitle>
+          <CardDescription>Tracks message IDs, delivery status, and errors</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
             <TableSkeleton rows={5} label="Loading email logs..." />
-          ) : logs.length === 0 ? (
-            <p className="text-sm text-slate-500 py-6 text-center">No emails sent yet.</p>
+          ) : visibleLogs.length === 0 ? (
+            <p className="text-sm text-slate-500 py-6 text-center">No email logs found.</p>
           ) : (
             <Table>
               <TableHeader>
@@ -157,11 +182,11 @@ export default function AdminEmailLogsPage() {
                   <TableHead>Related</TableHead>
                   <TableHead>Sent By</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Details / Resend ID</TableHead>
+                  <TableHead>Details / Message ID</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {logs.map((l) => (
+                {visibleLogs.map((l) => (
                   <TableRow key={l.id}>
                     <TableCell className="text-xs text-slate-500 whitespace-nowrap">
                       {new Date(l.sentAt || l.createdAt).toLocaleString()}

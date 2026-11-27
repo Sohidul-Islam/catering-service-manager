@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   CheckCircle2,
   Copy,
@@ -10,13 +11,16 @@ import {
   Link2,
   Mail,
   RefreshCw,
+  RotateCcw,
+  Search,
   Trash2,
 } from "lucide-react";
+import { ActionMenu, type ActionMenuItem } from "@/components/ui/action-menu";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog, Dialog } from "@/components/ui/dialog";
-import { Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -65,12 +69,16 @@ export default function AdminInvoicesPage() {
     return {
       year: filterCodecs.int(now.getFullYear(), { min: 2020, max: 2100 }),
       month: filterCodecs.int(now.getMonth() + 1, { min: 1, max: 12 }),
+      status: filterCodecs.enum(["", "UNPAID", "PARTIALLY_PAID", "PAID"] as const, ""),
+      search: filterCodecs.string(""),
     };
   }, []);
 
   const {
-    filters: { year, month },
+    filters: { year, month, status, search },
     setFilter,
+    resetFilters,
+    hasActiveFilters,
   } = useUrlFilters(invoicesSchema);
 
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
@@ -91,7 +99,12 @@ export default function AdminInvoicesPage() {
   async function loadInvoices() {
     setLoading(true);
     try {
-      const res = await fetch(`/api/invoices?year=${year}&month=${month}`);
+      const qs = new URLSearchParams({
+        year: String(year),
+        month: String(month),
+        ...(status ? { status } : {}),
+      });
+      const res = await fetch(`/api/invoices?${qs.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load invoices");
       setInvoices(json.invoices);
@@ -110,7 +123,7 @@ export default function AdminInvoicesPage() {
 
   useEffect(() => {
     loadInvoices();
-  }, [year, month]);
+  }, [year, month, status]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -222,7 +235,7 @@ export default function AdminInvoicesPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to send invoice email");
-      toast.success("Invoice email sent via Resend");
+      toast.success("Invoice email sent");
       setPreviewOpen(false);
       await loadInvoices();
     } catch (err) {
@@ -238,6 +251,16 @@ export default function AdminInvoicesPage() {
     if (typeof window === "undefined") return `/invoice/${tok}`;
     return `${window.location.origin}/invoice/${tok}`;
   }
+
+  const searchLower = search.trim().toLowerCase();
+  const visibleInvoices = searchLower
+    ? invoices.filter(
+        (inv) =>
+          inv.invoiceNumber.toLowerCase().includes(searchLower) ||
+          inv.user.name.toLowerCase().includes(searchLower) ||
+          inv.user.email.toLowerCase().includes(searchLower)
+      )
+    : invoices;
 
   return (
     <div className="space-y-4">
@@ -280,18 +303,53 @@ export default function AdminInvoicesPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Invoices ({invoices.length})</CardTitle>
-          <CardDescription>
-            Generate public share links or manually preview and send invoice emails
-          </CardDescription>
+        <CardHeader className="flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <CardTitle>
+              Invoices ({visibleInvoices.length}
+              {visibleInvoices.length !== invoices.length ? ` of ${invoices.length}` : ""})
+            </CardTitle>
+            <CardDescription>
+              Generate public share links or manually preview and send invoice emails
+            </CardDescription>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Input
+                value={search}
+                onChange={(e) => setFilter("search", e.target.value)}
+                placeholder="Search invoice or guest..."
+                className="pl-8 w-52 h-9 text-xs"
+              />
+            </div>
+            <Select
+              className="w-36 h-9 text-xs"
+              value={status}
+              onChange={(e) =>
+                setFilter("status", e.target.value as "" | "UNPAID" | "PARTIALLY_PAID" | "PAID")
+              }
+            >
+              <option value="">All Statuses</option>
+              <option value="UNPAID">Unpaid</option>
+              <option value="PARTIALLY_PAID">Partially Paid</option>
+              <option value="PAID">Paid</option>
+            </Select>
+            {hasActiveFilters && (
+              <Button size="sm" variant="ghost" onClick={resetFilters}>
+                <RotateCcw className="h-3.5 w-3.5" /> Reset
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
             <TableSkeleton rows={5} label="Loading monthly invoices..." />
-          ) : invoices.length === 0 ? (
+          ) : visibleInvoices.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">
-              No invoices for this month yet. Click &ldquo;Generate Invoices&rdquo; above.
+              {invoices.length === 0
+                ? "No invoices match this month/filter yet."
+                : "No invoices match your search."}
             </p>
           ) : (
             <Table>
@@ -308,10 +366,49 @@ export default function AdminInvoicesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {invoices.map((inv) => {
+                {visibleInvoices.map((inv) => {
                   const balance = Math.max(0, inv.totalAmountPoisha - inv.paidAmountPoisha);
                   const lastSent = inv.emailLogs?.[0]?.sentAt ?? null;
                   const pubUrl = getPublicUrl(inv);
+
+                  const menuItems: ActionMenuItem[] = [
+                    {
+                      key: "view",
+                      label: "View Breakdown",
+                      icon: <Eye className="h-3.5 w-3.5" />,
+                      onClick: () => setSelectedInvoice(inv),
+                    },
+                    pubUrl
+                      ? {
+                          key: "copy-link",
+                          label: "Copy Public Link",
+                          icon: <Copy className="h-3.5 w-3.5" />,
+                          onClick: () => {
+                            navigator.clipboard?.writeText(pubUrl);
+                            toast.success("Public link copied");
+                          },
+                        }
+                      : {
+                          key: "gen-link",
+                          label: "Generate Public Link",
+                          icon: <Link2 className="h-3.5 w-3.5" />,
+                          onClick: () => handlePublicLink(inv.id, "generate"),
+                        },
+                    {
+                      key: "send-email",
+                      label: lastSent ? "Send Email Again" : "Send Invoice Email",
+                      icon: <Mail className="h-3.5 w-3.5" />,
+                      onClick: () => openInvoiceEmailPreview(inv.id),
+                    },
+                    {
+                      key: "delete",
+                      label: "Delete Invoice",
+                      icon: <Trash2 className="h-3.5 w-3.5" />,
+                      variant: "danger",
+                      dividerBefore: true,
+                      onClick: () => setDeleteTarget(inv),
+                    },
+                  ];
 
                   return (
                     <TableRow key={inv.id}>
@@ -319,7 +416,12 @@ export default function AdminInvoicesPage() {
                         {inv.invoiceNumber}
                       </TableCell>
                       <TableCell>
-                        <p className="font-medium text-slate-900">{inv.user.name}</p>
+                        <Link
+                          href={`/admin/guests/${inv.user.id}`}
+                          className="font-medium text-slate-900 hover:text-blue-600 hover:underline"
+                        >
+                          {inv.user.name}
+                        </Link>
                         <p className="text-xs text-slate-500">{inv.user.email}</p>
                       </TableCell>
                       <TableCell className="text-right">{inv.totalMeals}</TableCell>
@@ -355,53 +457,7 @@ export default function AdminInvoicesPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="inline-flex flex-wrap justify-end items-center gap-1.5">
-                          {pubUrl ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                navigator.clipboard?.writeText(pubUrl);
-                                toast.success("Public link copied");
-                              }}
-                              title="Copy Public Link"
-                            >
-                              <Copy className="h-3.5 w-3.5" /> Link
-                            </Button>
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handlePublicLink(inv.id, "generate")}
-                            >
-                              <Link2 className="h-3.5 w-3.5" /> Public Link
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant={lastSent ? "outline" : "default"}
-                            onClick={() => openInvoiceEmailPreview(inv.id)}
-                          >
-                            <Mail className="h-3.5 w-3.5" />
-                            {lastSent ? "Send Again" : "Send Email"}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setSelectedInvoice(inv)}
-                          >
-                            <Eye className="h-3.5 w-3.5" /> View
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
-                            onClick={() => setDeleteTarget(inv)}
-                            title="Delete Invoice"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" /> Delete
-                          </Button>
-                        </div>
+                        <ActionMenu label={`Actions for ${inv.invoiceNumber}`} items={menuItems} />
                       </TableCell>
                     </TableRow>
                   );

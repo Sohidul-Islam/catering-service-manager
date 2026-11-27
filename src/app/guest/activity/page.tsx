@@ -11,6 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatActivityDetails } from "@/lib/activity-format";
+import { TableSkeleton } from "@/components/ui/loading-state";
 import { toast } from "sonner";
 
 interface GuestLog {
@@ -53,7 +55,7 @@ export default function GuestActivityPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-slate-500 py-6 text-center">Loading...</p>
+            <TableSkeleton rows={4} label="Loading activity..." />
           ) : logs.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">No activity recorded yet.</p>
           ) : (
@@ -80,10 +82,8 @@ export default function GuestActivityPage() {
                     </TableCell>
                     <TableCell className="text-xs">{l.actor?.name || "System"}</TableCell>
                     <TableCell className="text-xs">{l.date || "—"}</TableCell>
-                    <TableCell className="text-xs text-slate-600">
-                      {l.previousValue ? `${l.previousValue} → ` : ""}
-                      {l.newValue || ""}
-                      {l.reason ? ` (${l.reason})` : ""}
+                    <TableCell className="text-xs text-slate-600 max-w-md break-words">
+                      {formatActivityDetails(l.previousValue, l.newValue, l.reason)}
                     </TableCell>
                   </TableRow>
                 ))}

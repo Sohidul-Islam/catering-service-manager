@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Mail, Plus } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { Mail, Plus, RotateCcw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +20,8 @@ import { EmailPreviewData, EmailPreviewModal } from "@/components/email/EmailPre
 import { formatBDT, poishaToBdt } from "@/lib/money";
 import { toast } from "sonner";
 import { TableSkeleton } from "@/components/ui/loading-state";
+import { useUrlFilters } from "@/hooks/useUrlFilters";
+import { filterCodecs } from "@/lib/url-filters";
 
 interface PaymentRow {
   id: string;
@@ -57,6 +60,22 @@ interface UnpaidInvoice {
 }
 
 export default function AdminPaymentsPage() {
+  const paymentsSchema = useMemo(
+    () => ({
+      search: filterCodecs.string(""),
+      method: filterCodecs.enum(["", "CASH", "BANK_TRANSFER", "OTHER"] as const, ""),
+      type: filterCodecs.enum(["", "FULL", "PARTIAL", "SELECTED_DATES"] as const, ""),
+    }),
+    []
+  );
+
+  const {
+    filters: { search, method: methodFilter, type: typeFilter },
+    setFilter,
+    resetFilters,
+    hasActiveFilters,
+  } = useUrlFilters(paymentsSchema);
+
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [invoices, setInvoices] = useState<UnpaidInvoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,7 +130,7 @@ export default function AdminPaymentsPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Send failed");
-      toast.success("Payment confirmation email sent via Resend");
+      toast.success("Payment confirmation email sent");
       setPreviewOpen(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Email send failed");
@@ -210,6 +229,23 @@ export default function AdminPaymentsPage() {
     }
   }
 
+  const filteredPayments = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return payments.filter((p) => {
+      if (methodFilter && p.method !== methodFilter) return false;
+      if (typeFilter && p.paymentType !== typeFilter) return false;
+      if (q) {
+        const matches =
+          p.user.name.toLowerCase().includes(q) ||
+          p.user.email.toLowerCase().includes(q) ||
+          p.invoice.invoiceNumber.toLowerCase().includes(q) ||
+          (p.reference?.toLowerCase().includes(q) ?? false);
+        if (!matches) return false;
+      }
+      return true;
+    });
+  }, [payments, search, methodFilter, typeFilter]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -225,15 +261,64 @@ export default function AdminPaymentsPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Payment History ({payments.length})</CardTitle>
-          <CardDescription>Complete audit trail of all received payments and date allocations</CardDescription>
+        <CardHeader className="flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <CardTitle>
+              Payment History ({filteredPayments.length}
+              {filteredPayments.length !== payments.length ? ` of ${payments.length}` : ""})
+            </CardTitle>
+            <CardDescription>Complete audit trail of all received payments and date allocations</CardDescription>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Input
+                value={search}
+                onChange={(e) => setFilter("search", e.target.value)}
+                placeholder="Search guest, invoice, ref..."
+                className="pl-8 w-52 h-9 text-xs"
+              />
+            </div>
+            <Select
+              className="w-36 h-9 text-xs"
+              value={methodFilter}
+              onChange={(e) =>
+                setFilter("method", e.target.value as "" | "CASH" | "BANK_TRANSFER" | "OTHER")
+              }
+            >
+              <option value="">All Methods</option>
+              <option value="CASH">Cash</option>
+              <option value="BANK_TRANSFER">Bank Transfer</option>
+              <option value="OTHER">Other</option>
+            </Select>
+            <Select
+              className="w-36 h-9 text-xs"
+              value={typeFilter}
+              onChange={(e) =>
+                setFilter("type", e.target.value as "" | "FULL" | "PARTIAL" | "SELECTED_DATES")
+              }
+            >
+              <option value="">All Types</option>
+              <option value="FULL">Full</option>
+              <option value="PARTIAL">Partial</option>
+              <option value="SELECTED_DATES">Selected Dates</option>
+            </Select>
+            {hasActiveFilters && (
+              <Button size="sm" variant="ghost" onClick={resetFilters}>
+                <RotateCcw className="h-3.5 w-3.5" /> Reset
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
             <TableSkeleton rows={5} label="Loading payments..." />
-          ) : payments.length === 0 ? (
-            <p className="text-sm text-slate-500 py-6 text-center">No payments recorded yet.</p>
+          ) : filteredPayments.length === 0 ? (
+            <p className="text-sm text-slate-500 py-6 text-center">
+              {payments.length === 0
+                ? "No payments recorded yet."
+                : "No payments match your filters."}
+            </p>
           ) : (
             <Table>
               <TableHeader>
@@ -249,12 +334,19 @@ export default function AdminPaymentsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {payments.map((p) => (
+                {filteredPayments.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell className="text-xs">
                       {new Date(p.paidAt).toLocaleDateString()}
                     </TableCell>
-                    <TableCell className="font-medium text-slate-900">{p.user.name}</TableCell>
+                    <TableCell>
+                      <Link
+                        href={`/admin/guests/${p.user.id}`}
+                        className="font-medium text-slate-900 hover:text-blue-600 hover:underline"
+                      >
+                        {p.user.name}
+                      </Link>
+                    </TableCell>
                     <TableCell className="font-mono text-xs">{p.invoice.invoiceNumber}</TableCell>
                     <TableCell>
                       <Badge variant="info">{p.paymentType.replace("_", " ")}</Badge>
