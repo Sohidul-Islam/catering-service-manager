@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { CalendarDays, Download, Eye } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { CalendarDays, Download, Eye, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +17,8 @@ import {
 import { formatBDT } from "@/lib/money";
 import { MealSummaryPanel } from "@/components/summary/MealSummaryPanel";
 import { PageLoader } from "@/components/ui/loading-state";
+import { useUrlFilters } from "@/hooks/useUrlFilters";
+import { filterCodecs } from "@/lib/url-filters";
 import { toast } from "sonner";
 
 interface ReportData {
@@ -73,14 +75,27 @@ interface ReportData {
 }
 
 export default function AdminReportsPage() {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [guestId, setGuestId] = useState("");
-  const [status, setStatus] = useState("");
-  const [onlyTakenDays, setOnlyTakenDays] = useState(true);
+  const reportsSchema = useMemo(() => {
+    const now = new Date();
+    return {
+      year: filterCodecs.int(now.getFullYear(), { min: 2020, max: 2100 }),
+      month: filterCodecs.int(now.getMonth() + 1, { min: 1, max: 12 }),
+      startDate: filterCodecs.date(""),
+      endDate: filterCodecs.date(""),
+      guestId: filterCodecs.string(""),
+      status: filterCodecs.enum(["", "PAID", "PARTIALLY_PAID", "UNPAID"] as const, ""),
+      onlyTakenDays: filterCodecs.boolean(true),
+    };
+  }, []);
+
+  const {
+    filters: { year, month, startDate, endDate, guestId, status, onlyTakenDays },
+    setFilter,
+    setFilters,
+    resetFilters,
+    hasActiveFilters,
+  } = useUrlFilters(reportsSchema);
+
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -135,14 +150,22 @@ export default function AdminReportsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Select className="w-32" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+          <Select
+            className="w-32"
+            value={month}
+            onChange={(e) => setFilter("month", Number(e.target.value))}
+          >
             {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
               <option key={m} value={m}>
                 {new Date(2026, m - 1).toLocaleDateString("en-US", { month: "long" })}
               </option>
             ))}
           </Select>
-          <Select className="w-24" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+          <Select
+            className="w-24"
+            value={year}
+            onChange={(e) => setFilter("year", Number(e.target.value))}
+          >
             {[2025, 2026, 2027].map((y) => (
               <option key={y} value={y}>
                 {y}
@@ -154,7 +177,7 @@ export default function AdminReportsPage() {
             aria-label="Start date"
             className="w-36"
             value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
+            onChange={(e) => setFilter("startDate", e.target.value)}
             title="Optional start date override"
           />
           <Input
@@ -162,22 +185,23 @@ export default function AdminReportsPage() {
             aria-label="End date"
             className="w-36"
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
+            onChange={(e) => setFilter("endDate", e.target.value)}
             title="Optional end date override"
           />
           {(startDate || endDate) && (
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => {
-                setStartDate("");
-                setEndDate("");
-              }}
+              onClick={() => setFilters({ startDate: "", endDate: "" })}
             >
               Clear Dates
             </Button>
           )}
-          <Select className="w-40" value={guestId} onChange={(e) => setGuestId(e.target.value)}>
+          <Select
+            className="w-40"
+            value={guestId}
+            onChange={(e) => setFilter("guestId", e.target.value)}
+          >
             <option value="">All Guests</option>
             {data?.guests.map((g) => (
               <option key={g.id} value={g.id}>
@@ -185,12 +209,23 @@ export default function AdminReportsPage() {
               </option>
             ))}
           </Select>
-          <Select className="w-36" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <Select
+            className="w-36"
+            value={status}
+            onChange={(e) =>
+              setFilter("status", e.target.value as "" | "PAID" | "PARTIALLY_PAID" | "UNPAID")
+            }
+          >
             <option value="">All Statuses</option>
             <option value="PAID">Paid</option>
             <option value="PARTIALLY_PAID">Partially Paid</option>
             <option value="UNPAID">Unpaid</option>
           </Select>
+          {hasActiveFilters && (
+            <Button size="sm" variant="ghost" onClick={resetFilters}>
+              <RotateCcw className="h-3.5 w-3.5" /> Reset Filters
+            </Button>
+          )}
         </div>
       </div>
 
@@ -202,7 +237,7 @@ export default function AdminReportsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <MealSummaryPanel />
+          <MealSummaryPanel syncUrl />
         </CardContent>
       </Card>
 
@@ -291,16 +326,17 @@ export default function AdminReportsPage() {
                     <button
                       key={m.month}
                       type="button"
-                      onClick={() => {
-                        setStartDate("");
-                        setEndDate("");
-                        setMonth(m.month);
-                      }}
-                      className={`rounded-lg border p-2.5 text-left transition-colors cursor-pointer ${
-                        isActive
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-slate-200 bg-white hover:bg-slate-50"
-                      }`}
+                      onClick={() =>
+                        setFilters({
+                          startDate: "",
+                          endDate: "",
+                          month: m.month,
+                        })
+                      }
+                      className={`rounded-lg border p-2.5 text-left transition-colors cursor-pointer ${isActive
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-slate-200 bg-white hover:bg-slate-50"
+                        }`}
                     >
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-semibold text-slate-700">{monthLabel}</span>
@@ -326,7 +362,7 @@ export default function AdminReportsPage() {
               </div>
               <div className="flex items-center gap-2">
                 {guestId && (
-                  <Button size="sm" variant="ghost" onClick={() => setGuestId("")}>
+                  <Button size="sm" variant="ghost" onClick={() => setFilter("guestId", "")}>
                     Show All Guests
                   </Button>
                 )}
@@ -351,10 +387,9 @@ export default function AdminReportsPage() {
                   {data.mealReport.guestBreakdown.map((g) => (
                     <TableRow
                       key={g.userId}
-                      className={`cursor-pointer hover:bg-slate-50 ${
-                        guestId === g.userId ? "bg-blue-50/60" : ""
-                      }`}
-                      onClick={() => setGuestId(g.userId)}
+                      className={`cursor-pointer hover:bg-slate-50 ${guestId === g.userId ? "bg-blue-50/60" : ""
+                        }`}
+                      onClick={() => setFilter("guestId", g.userId)}
                     >
                       <TableCell>
                         <p className="font-medium text-slate-900">{g.name}</p>
@@ -374,7 +409,7 @@ export default function AdminReportsPage() {
                           variant={guestId === g.userId ? "default" : "outline"}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setGuestId(guestId === g.userId ? "" : g.userId);
+                            setFilter("guestId", guestId === g.userId ? "" : g.userId);
                           }}
                         >
                           <Eye className="h-3.5 w-3.5" />{" "}
@@ -410,7 +445,7 @@ export default function AdminReportsPage() {
                     <input
                       type="checkbox"
                       checked={onlyTakenDays}
-                      onChange={(e) => setOnlyTakenDays(e.target.checked)}
+                      onChange={(e) => setFilter("onlyTakenDays", e.target.checked)}
                     />
                     Only show days with meals (&gt; 0)
                   </label>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarOff,
   Check,
@@ -43,6 +43,8 @@ import {
 import { invalidateDashboardCache } from "@/lib/dashboard-cache";
 import { copyTextToClipboard, formatMealSummaryText } from "@/lib/meal-summary";
 import { addDays } from "@/lib/timezone";
+import { useUrlFilters } from "@/hooks/useUrlFilters";
+import { filterCodecs } from "@/lib/url-filters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -138,11 +140,25 @@ function getDayOfWeekUtc(dateStr: string): number {
 }
 
 export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
-  const nowDate = new Date();
-  const [year, setYear] = useState(nowDate.getFullYear());
-  const [month, setMonth] = useState(nowDate.getMonth() + 1);
-  const [view, setView] = useState<"month" | "week">("month");
-  const [weekIndex, setWeekIndex] = useState(0);
+  const calendarSchema = useMemo(() => {
+    const nowDate = new Date();
+    return {
+      year: filterCodecs.int(nowDate.getFullYear(), { min: 2020, max: 2100 }),
+      month: filterCodecs.int(nowDate.getMonth() + 1, { min: 1, max: 12 }),
+      view: filterCodecs.enum(["month", "week"] as const, "month"),
+      week: filterCodecs.int(0, { min: 0, max: 5 }),
+    };
+  }, []);
+
+  const {
+    filters: { year, month, view, week: weekIndex },
+    setFilter,
+    setFilters,
+  } = useUrlFilters(calendarSchema, {
+    resetKeysOnFilterChange: ["week"],
+    nonResettingKeys: ["week", "view"],
+  });
+
   const [data, setData] = useState<CalendarResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedDay, setSelectedDay] = useState<CalendarDay | null>(null);
@@ -278,29 +294,23 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
 
   function handlePrevMonth() {
     if (month === 1) {
-      setYear((y) => y - 1);
-      setMonth(12);
+      setFilters({ year: year - 1, month: 12, week: 0 });
     } else {
-      setMonth((m) => m - 1);
+      setFilters({ month: month - 1, week: 0 });
     }
-    setWeekIndex(0);
   }
 
   function handleNextMonth() {
     if (month === 12) {
-      setYear((y) => y + 1);
-      setMonth(1);
+      setFilters({ year: year + 1, month: 1, week: 0 });
     } else {
-      setMonth((m) => m + 1);
+      setFilters({ month: month + 1, week: 0 });
     }
-    setWeekIndex(0);
   }
 
   function handleToday() {
     const t = new Date();
-    setYear(t.getFullYear());
-    setMonth(t.getMonth() + 1);
-    setWeekIndex(0);
+    setFilters({ year: t.getFullYear(), month: t.getMonth() + 1, week: 0 });
   }
 
   async function handleGenerateMonth() {
@@ -619,7 +629,9 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
     weeks.push(paddedCells.slice(i, i + 7));
   }
 
-  const visibleCells = view === "month" ? paddedCells : weeks[weekIndex] ?? paddedCells.slice(0, 7);
+  const safeWeekIndex = Math.min(weekIndex, Math.max(0, weeks.length - 1));
+  const visibleCells =
+    view === "month" ? paddedCells : weeks[safeWeekIndex] ?? paddedCells.slice(0, 7);
 
   function openDayModal(day: CalendarDay) {
     setSelectedDay(day);
@@ -902,7 +914,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
             <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
               <button
                 type="button"
-                onClick={() => setView("month")}
+                onClick={() => setFilters({ view: "month", week: 0 })}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-xs font-medium cursor-pointer",
                   view === "month" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600"
@@ -912,7 +924,7 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
               </button>
               <button
                 type="button"
-                onClick={() => setView("week")}
+                onClick={() => setFilter("view", "week")}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-xs font-medium cursor-pointer",
                   view === "week" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600"
@@ -927,16 +939,18 @@ export function MealCalendar({ mode }: { mode: "ADMIN" | "GUEST" }) {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={weekIndex === 0}
-                  onClick={() => setWeekIndex((w) => Math.max(0, w - 1))}
+                  disabled={safeWeekIndex === 0}
+                  onClick={() => setFilter("week", Math.max(0, safeWeekIndex - 1))}
                 >
                   Prev Wk
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={weekIndex >= weeks.length - 1}
-                  onClick={() => setWeekIndex((w) => Math.min(weeks.length - 1, w + 1))}
+                  disabled={safeWeekIndex >= weeks.length - 1}
+                  onClick={() =>
+                    setFilter("week", Math.min(weeks.length - 1, safeWeekIndex + 1))
+                  }
                 >
                   Next Wk
                 </Button>

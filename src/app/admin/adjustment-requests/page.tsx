@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Check, X } from "lucide-react";
 import { TableSkeleton } from "@/components/ui/loading-state";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useUrlFilters } from "@/hooks/useUrlFilters";
+import { filterCodecs } from "@/lib/url-filters";
 import { toast } from "sonner";
 
 interface AdjRequest {
@@ -31,8 +33,22 @@ interface AdjRequest {
 }
 
 export default function AdminAdjustmentRequestsPage() {
+  const requestsSchema = useMemo(
+    () => ({
+      status: filterCodecs.enum(
+        ["PENDING", "APPROVED", "REJECTED", "ALL"] as const,
+        "PENDING"
+      ),
+    }),
+    []
+  );
+
+  const {
+    filters: { status: filter },
+    setFilter,
+  } = useUrlFilters(requestsSchema);
+
   const [requests, setRequests] = useState<AdjRequest[]>([]);
-  const [filter, setFilter] = useState<"ALL" | "PENDING" | "APPROVED" | "REJECTED">("PENDING");
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
@@ -93,7 +109,7 @@ export default function AdminAdjustmentRequestsPage() {
               key={s}
               size="sm"
               variant={filter === s ? "default" : "outline"}
-              onClick={() => setFilter(s)}
+              onClick={() => setFilter("status", s)}
             >
               {s}
             </Button>

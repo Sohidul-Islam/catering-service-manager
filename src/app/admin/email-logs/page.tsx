@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
 import {
@@ -12,6 +14,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useUrlFilters } from "@/hooks/useUrlFilters";
+import { filterCodecs } from "@/lib/url-filters";
 import { toast } from "sonner";
 import { TableSkeleton } from "@/components/ui/loading-state";
 
@@ -32,9 +36,32 @@ interface EmailLogRow {
 }
 
 export default function AdminEmailLogsPage() {
+  const emailLogsSchema = useMemo(
+    () => ({
+      emailType: filterCodecs.enum(
+        [
+          "",
+          "GUEST_INVITATION",
+          "MEAL_CONFIRMATION",
+          "MEAL_ADJUSTMENT",
+          "INVOICE",
+          "PAYMENT_CONFIRMATION",
+        ] as const,
+        ""
+      ),
+      status: filterCodecs.enum(["", "SENT", "FAILED", "PENDING"] as const, ""),
+    }),
+    []
+  );
+
+  const {
+    filters: { emailType: typeFilter, status: statusFilter },
+    setFilter,
+    resetFilters,
+    hasActiveFilters,
+  } = useUrlFilters(emailLogsSchema);
+
   const [logs, setLogs] = useState<EmailLogRow[]>([]);
-  const [typeFilter, setTypeFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -63,11 +90,22 @@ export default function AdminEmailLogsPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Select
             className="w-48"
             value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
+            onChange={(e) =>
+              setFilter(
+                "emailType",
+                e.target.value as
+                  | ""
+                  | "GUEST_INVITATION"
+                  | "MEAL_CONFIRMATION"
+                  | "MEAL_ADJUSTMENT"
+                  | "INVOICE"
+                  | "PAYMENT_CONFIRMATION"
+              )
+            }
           >
             <option value="">All Types</option>
             <option value="GUEST_INVITATION">Guest Invitation</option>
@@ -79,13 +117,20 @@ export default function AdminEmailLogsPage() {
           <Select
             className="w-36"
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) =>
+              setFilter("status", e.target.value as "" | "SENT" | "FAILED" | "PENDING")
+            }
           >
             <option value="">All Statuses</option>
             <option value="SENT">Sent</option>
             <option value="FAILED">Failed</option>
             <option value="PENDING">Pending</option>
           </Select>
+          {hasActiveFilters && (
+            <Button size="sm" variant="ghost" onClick={resetFilters}>
+              <RotateCcw className="h-3.5 w-3.5" /> Clear
+            </Button>
+          )}
         </div>
       </div>
 

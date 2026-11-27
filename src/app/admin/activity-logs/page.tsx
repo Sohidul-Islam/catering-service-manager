@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
 import {
@@ -12,6 +14,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useUrlFilters } from "@/hooks/useUrlFilters";
+import { filterCodecs } from "@/lib/url-filters";
 import { toast } from "sonner";
 import { TableSkeleton } from "@/components/ui/loading-state";
 
@@ -29,8 +33,34 @@ interface LogRow {
 }
 
 export default function AdminActivityLogsPage() {
+  const activitySchema = useMemo(
+    () => ({
+      action: filterCodecs.enum(
+        [
+          "",
+          "GUEST_UPDATE_MEAL",
+          "ADMIN_UPDATE_MEAL",
+          "ADMIN_OVERRIDE_LOCKED_MEAL",
+          "APPROVE_ADJUSTMENT_REQUEST",
+          "RECORD_PAYMENT",
+          "GENERATE_INVOICE",
+          "SET_DATE_MEAL_PRICE",
+          "UPSERT_HOLIDAY",
+        ] as const,
+        ""
+      ),
+    }),
+    []
+  );
+
+  const {
+    filters: { action: actionFilter },
+    setFilter,
+    resetFilters,
+    hasActiveFilters,
+  } = useUrlFilters(activitySchema);
+
   const [logs, setLogs] = useState<LogRow[]>([]);
-  const [actionFilter, setActionFilter] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -55,21 +85,42 @@ export default function AdminActivityLogsPage() {
             Tracks all meal updates, overrides, pricing changes, invoices, and payments.
           </p>
         </div>
-        <Select
-          className="w-56"
-          value={actionFilter}
-          onChange={(e) => setActionFilter(e.target.value)}
-        >
-          <option value="">All Actions</option>
-          <option value="GUEST_UPDATE_MEAL">Guest Meal Change</option>
-          <option value="ADMIN_UPDATE_MEAL">Admin Meal Change</option>
-          <option value="ADMIN_OVERRIDE_LOCKED_MEAL">Admin Override Locked Meal</option>
-          <option value="APPROVE_ADJUSTMENT_REQUEST">Approve Adjustment</option>
-          <option value="RECORD_PAYMENT">Record Payment</option>
-          <option value="GENERATE_INVOICE">Generate Invoice</option>
-          <option value="SET_DATE_MEAL_PRICE">Date Price Override</option>
-          <option value="UPSERT_HOLIDAY">Holiday Change</option>
-        </Select>
+        <div className="flex items-center gap-2">
+          <Select
+            className="w-56"
+            value={actionFilter}
+            onChange={(e) =>
+              setFilter(
+                "action",
+                e.target.value as
+                  | ""
+                  | "GUEST_UPDATE_MEAL"
+                  | "ADMIN_UPDATE_MEAL"
+                  | "ADMIN_OVERRIDE_LOCKED_MEAL"
+                  | "APPROVE_ADJUSTMENT_REQUEST"
+                  | "RECORD_PAYMENT"
+                  | "GENERATE_INVOICE"
+                  | "SET_DATE_MEAL_PRICE"
+                  | "UPSERT_HOLIDAY"
+              )
+            }
+          >
+            <option value="">All Actions</option>
+            <option value="GUEST_UPDATE_MEAL">Guest Meal Change</option>
+            <option value="ADMIN_UPDATE_MEAL">Admin Meal Change</option>
+            <option value="ADMIN_OVERRIDE_LOCKED_MEAL">Admin Override Locked Meal</option>
+            <option value="APPROVE_ADJUSTMENT_REQUEST">Approve Adjustment</option>
+            <option value="RECORD_PAYMENT">Record Payment</option>
+            <option value="GENERATE_INVOICE">Generate Invoice</option>
+            <option value="SET_DATE_MEAL_PRICE">Date Price Override</option>
+            <option value="UPSERT_HOLIDAY">Holiday Change</option>
+          </Select>
+          {hasActiveFilters && (
+            <Button size="sm" variant="ghost" onClick={resetFilters}>
+              <RotateCcw className="h-3.5 w-3.5" /> Clear
+            </Button>
+          )}
+        </div>
       </div>
 
       <Card>

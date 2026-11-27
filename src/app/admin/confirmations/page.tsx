@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Check, CheckCircle2, Copy, Eye, Mail, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,8 @@ import { formatBDT } from "@/lib/money";
 import { TableSkeleton } from "@/components/ui/loading-state";
 import { copyTextToClipboard, formatMealSummaryText } from "@/lib/meal-summary";
 import { addDays } from "@/lib/timezone";
+import { useUrlFilters } from "@/hooks/useUrlFilters";
+import { filterCodecs } from "@/lib/url-filters";
 import { toast } from "sonner";
 
 interface ConfirmationGuestRow {
@@ -41,7 +43,18 @@ function getDefaultTomorrowDate(): string {
 }
 
 export default function AdminMealConfirmationsPage() {
-  const [date, setDate] = useState(getDefaultTomorrowDate);
+  const confirmationsSchema = useMemo(
+    () => ({
+      date: filterCodecs.date(getDefaultTomorrowDate()),
+    }),
+    []
+  );
+
+  const {
+    filters: { date },
+    setFilter,
+  } = useUrlFilters(confirmationsSchema);
+
   const [rows, setRows] = useState<ConfirmationGuestRow[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [note, setNote] = useState("");
@@ -175,8 +188,8 @@ export default function AdminMealConfirmationsPage() {
           date === effectiveToday
             ? "today"
             : date === effectiveTomorrow
-            ? "tomorrow"
-            : "custom",
+              ? "tomorrow"
+              : "custom",
         today: effectiveToday,
         tomorrow: effectiveTomorrow,
         startDate: date,
@@ -226,7 +239,7 @@ export default function AdminMealConfirmationsPage() {
               id="conf-date"
               type="date"
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => setFilter("date", e.target.value)}
               className="mt-1 w-44"
             />
           </div>

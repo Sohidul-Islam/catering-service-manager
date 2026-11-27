@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -27,6 +27,7 @@ import {
 import { cn } from "@/lib/utils";
 import { invalidateCalendarCache } from "@/lib/calendar-cache";
 import { invalidateDashboardCache } from "@/lib/dashboard-cache";
+import { PageLoader } from "@/components/ui/loading-state";
 import { toast } from "sonner";
 
 export interface NavUser {
@@ -231,7 +232,9 @@ export function AppShell({
           </div>
         </header>
 
-        <main className="flex-1 p-4 lg:p-6 max-w-7xl w-full mx-auto">{children}</main>
+        <main className="flex-1 p-4 lg:p-6 max-w-7xl w-full mx-auto">
+          <Suspense fallback={<PageLoader label="Loading page..." />}>{children}</Suspense>
+        </main>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   Copy,
@@ -29,6 +29,8 @@ import { EmailPreviewData, EmailPreviewModal } from "@/components/email/EmailPre
 import { formatBDT } from "@/lib/money";
 import { TableSkeleton } from "@/components/ui/loading-state";
 import { invalidateDashboardCache } from "@/lib/dashboard-cache";
+import { useUrlFilters } from "@/hooks/useUrlFilters";
+import { filterCodecs } from "@/lib/url-filters";
 import { toast } from "sonner";
 
 interface InvoiceItemRow {
@@ -58,9 +60,19 @@ interface InvoiceRow {
 }
 
 export default function AdminInvoicesPage() {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
+  const invoicesSchema = useMemo(() => {
+    const now = new Date();
+    return {
+      year: filterCodecs.int(now.getFullYear(), { min: 2020, max: 2100 }),
+      month: filterCodecs.int(now.getMonth() + 1, { min: 1, max: 12 }),
+    };
+  }, []);
+
+  const {
+    filters: { year, month },
+    setFilter,
+  } = useUrlFilters(invoicesSchema);
+
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -241,7 +253,7 @@ export default function AdminInvoicesPage() {
           <Select
             className="w-36"
             value={month}
-            onChange={(e) => setMonth(Number(e.target.value))}
+            onChange={(e) => setFilter("month", Number(e.target.value))}
           >
             {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
               <option key={m} value={m}>
@@ -252,7 +264,7 @@ export default function AdminInvoicesPage() {
           <Select
             className="w-24"
             value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
+            onChange={(e) => setFilter("year", Number(e.target.value))}
           >
             {[2025, 2026, 2027, 2028].map((y) => (
               <option key={y} value={y}>
@@ -323,8 +335,8 @@ export default function AdminInvoicesPage() {
                             inv.status === "PAID"
                               ? "success"
                               : inv.status === "PARTIALLY_PAID"
-                              ? "warning"
-                              : "danger"
+                                ? "warning"
+                                : "danger"
                           }
                         >
                           {inv.status.replace("_", " ")}
@@ -408,8 +420,8 @@ export default function AdminInvoicesPage() {
         description={
           selectedInvoice
             ? `${selectedInvoice.user.name} • Billing ${selectedInvoice.year}-${String(
-                selectedInvoice.month
-              ).padStart(2, "0")}`
+              selectedInvoice.month
+            ).padStart(2, "0")}`
             : ""
         }
         maxWidthClass="max-w-2xl"
@@ -551,14 +563,13 @@ export default function AdminInvoicesPage() {
         description={
           deleteTarget
             ? `Delete invoice ${deleteTarget.invoiceNumber} for ${deleteTarget.user.name} (${deleteTarget.year}-${String(
-                deleteTarget.month
-              ).padStart(2, "0")}, Total: ${formatBDT(deleteTarget.totalAmountPoisha)})?${
-                deleteTarget.paidAmountPoisha > 0
-                  ? ` Warning: This will also permanently delete recorded payment(s) totaling ${formatBDT(
-                      deleteTarget.paidAmountPoisha
-                    )}.`
-                  : ""
-              } Underlying meal records in the calendar are preserved and can be re-invoiced later.`
+              deleteTarget.month
+            ).padStart(2, "0")}, Total: ${formatBDT(deleteTarget.totalAmountPoisha)})?${deleteTarget.paidAmountPoisha > 0
+              ? ` Warning: This will also permanently delete recorded payment(s) totaling ${formatBDT(
+                deleteTarget.paidAmountPoisha
+              )}.`
+              : ""
+            } Underlying meal records in the calendar are preserved and can be re-invoiced later.`
             : ""
         }
         confirmLabel="Delete Invoice"

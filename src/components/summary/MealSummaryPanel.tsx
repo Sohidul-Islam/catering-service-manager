@@ -15,6 +15,8 @@ import {
   resolveSummarySignature,
 } from "@/lib/meal-summary";
 import { addDays, formatDateRangeLabel, formatLongDate } from "@/lib/timezone";
+import { useUrlFilters } from "@/hooks/useUrlFilters";
+import { filterCodecs } from "@/lib/url-filters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -44,28 +46,59 @@ function getLocalTodayStr(): string {
 export function MealSummaryPanel({
   initialPeriod = "today",
   compact = false,
+  syncUrl = false,
   className,
 }: {
   initialPeriod?: MealSummaryPeriod;
   compact?: boolean;
+  syncUrl?: boolean;
   className?: string;
 }) {
-  const now = new Date();
-  const [period, setPeriod] = useState<MealSummaryPeriod>(initialPeriod);
-  const [anchorDate, setAnchorDate] = useState<string>("");
-  const [year, setYear] = useState<number>(now.getFullYear());
-  const [month, setMonth] = useState<number>(now.getMonth() + 1);
-  const [customStart, setCustomStart] = useState<string>(getLocalTodayStr);
-  const [customEnd, setCustomEnd] = useState<string>(getLocalTodayStr);
+  const baseYear = useMemo(() => new Date().getFullYear(), []);
+  const summarySchema = useMemo(() => {
+    const now = new Date();
+    const todayStr = getLocalTodayStr();
+    return {
+      period: filterCodecs.enum(
+        ["today", "tomorrow", "weekly", "monthly", "custom"] as const,
+        initialPeriod
+      ),
+      date: filterCodecs.date(""),
+      year: filterCodecs.int(now.getFullYear(), { min: 2020, max: 2100 }),
+      month: filterCodecs.int(now.getMonth() + 1, { min: 1, max: 12 }),
+      startDate: filterCodecs.date(todayStr),
+      endDate: filterCodecs.date(todayStr),
+      display: filterCodecs.enum(["email", "name_email", "name"] as const, "email"),
+      cost: filterCodecs.boolean(false),
+      daily: filterCodecs.boolean(false),
+      zero: filterCodecs.boolean(false),
+    };
+  }, [initialPeriod]);
+
+  const {
+    filters: {
+      period,
+      date: anchorDate,
+      year,
+      month,
+      startDate: customStart,
+      endDate: customEnd,
+      display: guestDisplay,
+      cost: includeCost,
+      daily: includeDailyBreakdown,
+      zero: includeZeroMealGuests,
+    },
+    setFilter,
+    setFilters,
+  } = useUrlFilters(summarySchema, {
+    prefix: "summary_",
+    enabled: syncUrl,
+  });
 
   const [data, setData] = useState<MealSummaryPayload | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [guestDisplay, setGuestDisplay] = useState<MealSummaryGuestDisplay>("email");
-  const [includeCost, setIncludeCost] = useState<boolean>(false);
-  const [includeDailyBreakdown, setIncludeDailyBreakdown] = useState<boolean>(false);
-  const [includeZeroMealGuests, setIncludeZeroMealGuests] = useState<boolean>(false);
   const [customNote, setCustomNote] = useState<string>("");
   const [signature, setSignature] = useState<string>("");
   const [hasStoredSignature, setHasStoredSignature] = useState<boolean>(false);
@@ -175,7 +208,6 @@ export function MealSummaryPanel({
     }
   }
 
-  const baseYear = now.getFullYear();
   const yearOptions = [baseYear - 1, baseYear, baseYear + 1, baseYear + 2];
 
   return (
@@ -188,9 +220,10 @@ export function MealSummaryPanel({
               key={tab.value}
               type="button"
               onClick={() => {
-                setPeriod(tab.value);
                 if (tab.value === "weekly" && !anchorDate && data?.today) {
-                  setAnchorDate(data.today);
+                  setFilters({ period: "weekly", date: data.today });
+                } else {
+                  setFilter("period", tab.value);
                 }
               }}
               className={cn(
@@ -229,7 +262,10 @@ export function MealSummaryPanel({
                 size="sm"
                 variant="outline"
                 onClick={() =>
-                  setAnchorDate(addDays(anchorDate || data?.today || getLocalTodayStr(), -7))
+                  setFilter(
+                    "date",
+                    addDays(anchorDate || data?.today || getLocalTodayStr(), -7)
+                  )
                 }
               >
                 <ChevronLeft className="h-3.5 w-3.5" /> Prev
@@ -238,7 +274,7 @@ export function MealSummaryPanel({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => setAnchorDate(data?.today || "")}
+                onClick={() => setFilter("date", data?.today || "")}
               >
                 This Week
               </Button>
@@ -247,7 +283,10 @@ export function MealSummaryPanel({
                 size="sm"
                 variant="outline"
                 onClick={() =>
-                  setAnchorDate(addDays(anchorDate || data?.today || getLocalTodayStr(), 7))
+                  setFilter(
+                    "date",
+                    addDays(anchorDate || data?.today || getLocalTodayStr(), 7)
+                  )
                 }
               >
                 Next <ChevronRight className="h-3.5 w-3.5" />
@@ -265,7 +304,7 @@ export function MealSummaryPanel({
               <Select
                 className="w-32 h-8 text-xs"
                 value={month}
-                onChange={(e) => setMonth(Number(e.target.value))}
+                onChange={(e) => setFilter("month", Number(e.target.value))}
               >
                 {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                   <option key={m} value={m}>
@@ -276,7 +315,7 @@ export function MealSummaryPanel({
               <Select
                 className="w-24 h-8 text-xs"
                 value={year}
-                onChange={(e) => setYear(Number(e.target.value))}
+                onChange={(e) => setFilter("year", Number(e.target.value))}
               >
                 {yearOptions.map((y) => (
                   <option key={y} value={y}>
@@ -294,7 +333,7 @@ export function MealSummaryPanel({
                 aria-label="Summary start date"
                 className="w-36 h-8 text-xs"
                 value={customStart}
-                onChange={(e) => setCustomStart(e.target.value)}
+                onChange={(e) => setFilter("startDate", e.target.value)}
               />
               <span className="text-xs text-slate-400">to</span>
               <Input
@@ -302,7 +341,7 @@ export function MealSummaryPanel({
                 aria-label="Summary end date"
                 className="w-36 h-8 text-xs"
                 value={customEnd}
-                onChange={(e) => setCustomEnd(e.target.value)}
+                onChange={(e) => setFilter("endDate", e.target.value)}
               />
             </div>
           )}
@@ -319,7 +358,7 @@ export function MealSummaryPanel({
                 <button
                   key={opt.value}
                   type="button"
-                  onClick={() => setGuestDisplay(opt.value)}
+                  onClick={() => setFilter("display", opt.value)}
                   className={cn(
                     "rounded px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer",
                     guestDisplay === opt.value
@@ -338,7 +377,7 @@ export function MealSummaryPanel({
               <input
                 type="checkbox"
                 checked={includeCost}
-                onChange={(e) => setIncludeCost(e.target.checked)}
+                onChange={(e) => setFilter("cost", e.target.checked)}
               />
               Include Cost (৳)
             </label>
@@ -347,7 +386,7 @@ export function MealSummaryPanel({
                 <input
                   type="checkbox"
                   checked={includeDailyBreakdown}
-                  onChange={(e) => setIncludeDailyBreakdown(e.target.checked)}
+                  onChange={(e) => setFilter("daily", e.target.checked)}
                 />
                 Daily Breakdown
               </label>
@@ -356,7 +395,7 @@ export function MealSummaryPanel({
               <input
                 type="checkbox"
                 checked={includeZeroMealGuests}
-                onChange={(e) => setIncludeZeroMealGuests(e.target.checked)}
+                onChange={(e) => setFilter("zero", e.target.checked)}
               />
               Include 0-meal guests
             </label>
