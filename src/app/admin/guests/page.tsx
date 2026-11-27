@@ -19,6 +19,7 @@ import {
 import { TableSkeleton } from "@/components/ui/loading-state";
 import { parseBulkGuestInput, type InvalidBulkGuest } from "@/lib/guest-bulk-parser";
 import { Button } from "@/components/ui/button";
+import { ActionMenu, type ActionMenuItem } from "@/components/ui/action-menu";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog, Dialog } from "@/components/ui/dialog";
@@ -489,62 +490,69 @@ export default function AdminGuestsPage() {
                       {formatBDT(g.outstandingPoisha)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="inline-flex flex-wrap justify-end items-center gap-1.5">
-                        {g.status === "INVITED" && g.invitation?.token && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              copyLink(
-                                `${window.location.origin}/invite/accept?token=${g.invitation!.token}`
-                              )
-                            }
-                          >
-                            <Copy className="h-3.5 w-3.5" /> Link
-                          </Button>
-                        )}
-                        {g.status === "INVITED" && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleReinvite(g.id)}
-                            title="Regenerate invite link"
-                          >
-                            <RefreshCw className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                        {g.status === "ACTIVE" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setResetLinkGuest(g)}
-                            title="Send password reset link via email"
-                          >
-                            <Send className="h-3.5 w-3.5" /> Reset Link
-                          </Button>
-                        )}
-                        {g.status !== "INVITED" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => openManualPasswordModal(g)}
-                            title="Change guest password manually"
-                          >
-                            <KeyRound className="h-3.5 w-3.5" /> Password
-                          </Button>
-                        )}
-                        <Link href={`/admin/guests/${g.id}`}>
-                          <Button size="sm" variant="outline">
-                            <Eye className="h-3.5 w-3.5" /> View Profile
-                          </Button>
-                        </Link>
-                        <Button size="sm" variant="outline" onClick={() => openHistory(g.id)}>
-                          <History className="h-3.5 w-3.5" /> History
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => setEditGuest(g)}>
-                          <UserCheck className="h-3.5 w-3.5" /> Edit
-                        </Button>
-                      </div>
+                      {(() => {
+                        const menuItems: ActionMenuItem[] = [
+                          {
+                            key: "profile",
+                            label: "View Profile",
+                            icon: <Eye className="h-3.5 w-3.5" />,
+                            href: `/admin/guests/${g.id}`,
+                          },
+                          {
+                            key: "edit",
+                            label: "Edit Guest",
+                            icon: <UserCheck className="h-3.5 w-3.5" />,
+                            onClick: () => setEditGuest(g),
+                          },
+                          {
+                            key: "history",
+                            label: "View History",
+                            icon: <History className="h-3.5 w-3.5" />,
+                            onClick: () => openHistory(g.id),
+                          },
+                        ];
+
+                        if (g.status === "INVITED") {
+                          if (g.invitation?.token) {
+                            menuItems.push({
+                              key: "copy-invite",
+                              label: "Copy Invite Link",
+                              icon: <Copy className="h-3.5 w-3.5" />,
+                              dividerBefore: true,
+                              onClick: () =>
+                                copyLink(
+                                  `${window.location.origin}/invite/accept?token=${g.invitation!.token}`
+                                ),
+                            });
+                          }
+                          menuItems.push({
+                            key: "reinvite",
+                            label: "Resend Invite Link",
+                            icon: <RefreshCw className="h-3.5 w-3.5" />,
+                            dividerBefore: !g.invitation?.token,
+                            onClick: () => handleReinvite(g.id),
+                          });
+                        } else {
+                          if (g.status === "ACTIVE") {
+                            menuItems.push({
+                              key: "reset-link",
+                              label: "Send Password Reset Link",
+                              icon: <Send className="h-3.5 w-3.5" />,
+                              dividerBefore: true,
+                              onClick: () => setResetLinkGuest(g),
+                            });
+                          }
+                          menuItems.push({
+                            key: "change-password",
+                            label: "Change Password",
+                            icon: <KeyRound className="h-3.5 w-3.5" />,
+                            dividerBefore: g.status !== "ACTIVE",
+                            onClick: () => openManualPasswordModal(g),
+                          });
+                        }
+
+                        return <ActionMenu label={`Actions for ${g.name}`} items={menuItems} />;
+                      })()}
                     </TableCell>
                   </TableRow>
                 ))}
